@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from eth_utils import to_checksum_address
 
 from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
-from core.performance.model import Realization, RealizedPnLIndicator
+from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
+from core.performance.model import Realization, RealizedPnLIndicator, UnrealizedPnLIndicator
 from core.services.utilities import get_token_issuance_timestamp, get_token_price_at_timestamp
 
 
@@ -27,11 +28,19 @@ class PerformanceCalculator:
       using the Weighted Average Cost (WAC) method
     """
 
-    def __init__(self, history: RealtokenEventHistory) -> None:
+    def __init__(self, history: RealtokenEventHistory, balance_snapshots_series: BalanceSnapshotSeries) -> None:
         self._history = history
+        self._balance_snapshots_series = balance_snapshots_series
+
         self._realizations_by_token: Dict[str, List[Realization]] = {}
+
+        # Realized performance
         self.realized_pnl_by_token: Dict[str, RealizedPnLIndicator] = {}
         self.global_realized_pnl: Optional[RealizedPnLIndicator] = None
+
+        # Unrealized performance
+        self.unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
+        self.global_unrealized_pnl: Optional[UnrealizedPnLIndicator] = None
 
         self._build_performance()
 
@@ -44,19 +53,27 @@ class PerformanceCalculator:
         """
         realizations_by_token: Dict[str, List[Realization]] = {}
         realized_pnl_by_token: Dict[str, RealizedPnLIndicator] = {}
+        unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
+        
 
         for token_address in self._history.tokens():
             token_address = to_checksum_address(token_address)
 
-            # Build realizations for every token present in the history
-            realizations_by_token[token_address] = self._build_realizations_for_token(token_address)
+            # Build realizations, WAC price and average holding days for every token present in the history
+            realizations_by_token[token_address], final_weighted_avg_cost, final_avg_holding_days = self._build_realizations_and_open_wac_state_for_token(token_address)
 
             # Build a Realized PnL for every token present in the history
             realized_pnl_by_token[token_address] = RealizedPnLIndicator(realizations_by_token[token_address])
 
+            # Build a Unrealized PnL for every token present in the history
+            current_price = Decimal(get_token_price_at_timestamp(realtoken_history_data, token_address, datetime.now(timezone.utc)))
+            current_quantity = self._balance_snapshots_series.latest().balances_by_token.get(token_address.lower(), Decimal("0"))
+            unrealized_pnl_by_token[token_address] = UnrealizedPnLIndicator(current_price, current_quantity, final_weighted_avg_cost, final_avg_holding_days)
+
 
         self._realizations_by_token = realizations_by_token
         self.realized_pnl_by_token = realized_pnl_by_token
+        self.unrealized_pnl_by_token = unrealized_pnl_by_token
 
         # Build the global Realized PnL (we take all the realizations of every tokens)
         all_realizations = []
@@ -65,14 +82,19 @@ class PerformanceCalculator:
                 all_realizations.append(realization)
         self.global_realized_pnl = RealizedPnLIndicator(all_realizations)
 
+        # Build the global Unrealized PnL (we take the unrealized indicator of every tokens)
+        token_indicators = unrealized_pnl_by_token.values()
+        self.global_unrealized_pnl = UnrealizedPnLIndicator.aggregate(token_indicators)
 
-    def _build_realizations_for_token(self, token_address: str) -> List["Realization"]:
+
+    def _build_realizations_and_open_wac_state_for_token(self, token_address: str) -> Tuple[List["Realization"], Decimal, float]:
         """
-        Convert all events for a token into Realization objects using WAC.
-
-        Finance idea (very explicit):
+        Convert all events for a token into Realization objects using WAC, and also return
+        final open-position metrics (WAC and avg holding days) for unrealized computations.
+        
+        Finance idea :
         - We build a "pool" of acquisitions (IN events). Each IN adds quantity and cost to the pool.
-        - For each OUT (sell/liquidation), we:
+        - For each OUT (sell, detokenisation, being liquidated, ...), we:
             1) compute the WAC at that exact moment:
                    WAC = total_cost_in_pool / total_qty_in_pool
             2) compute cost basis removed by this OUT:
@@ -80,22 +102,26 @@ class PerformanceCalculator:
             3) compute avg holding days of the pool at that moment (quantity-weighted holding time)
             4) reduce the pool *proportionally* (WAC equivalent):
                    each acquisition lot is reduced by the same fraction of the pool sold
-
-        Important: We intentionally keep an explicit list of "buy lots" (with remaining qty)
-        because it is easy to understand and to debug:
-        - you can inspect which buys formed the pool
-        - you can compute avg holding days transparently
-
+    
+        
         Transfers are ignored here for WAC because they do not represent a buy/sell price event
-        (your model requires price_per_token=None for TRANSFER).
-
+        
         Position consolidation:
         - Some datasets can contain OUT events that exceed the tracked IN events (missing acquisitions).
         - Instead of failing, we reconcile the position by injecting a synthetic acquisition lot *only inside*
           this computation (it is NOT added to the real event history).
-        - Current assumptions (temporary defaults you will later make dynamic):
-            * missing_qty is acquired at $50 per token
-            * acquisition date is 2023-01-01 (UTC)
+        
+        Returns:
+        - realizations: List[Realization] built from each OUT event.
+        - final_weighted_avg_cost: WAC of the remaining open pool after processing all events.
+          This represents the average acquisition cost per token for the current (remaining) position.
+          Returns 0 if the remaining quantity is 0.
+        - final_avg_holding_days: Quantity-weighted average holding time (in days) of the remaining open pool,
+          measured as of "now" (UTC). Returns 0 if the remaining quantity is 0.
+        
+        Notes:
+        - The final metrics describe the open position (what remains after all realized OUT events).
+          They are intended to be used to compute unrealized PnL from an external on-chain balance and spot price.
         """
         token_address = to_checksum_address(token_address)
 
@@ -236,39 +262,45 @@ class PerformanceCalculator:
             acquisition_lots.clear()
             acquisition_lots.extend(kept)
 
-        def _compute_missing_qty_for_consolidation() -> Decimal:
-            """
-            Scan the ordered event stream and compute how many tokens are "missing"
-            (OUT exceeds known IN) so we can reconcile the position before running WAC.
 
-            The goal is to make downstream calculations deterministic and avoid raising errors,
-            while keeping the underlying event history untouched.
+        def _compute_missing_qty_for_consolidation(token_address: str) -> Decimal:
+            """
+            Compute how many tokens must be added as a virtual IN lot so that:
+                sum(IN) - sum(OUT) == current_balance
             """
             tracked_qty = Decimal("0")
-            missing_qty = Decimal("0")
-
+        
             for ev in events:
                 # Transfers do not affect WAC position here (no price, no realized event).
                 if ev.event_type == RealtokenEventType.TRANSFER:
                     continue
-
+        
                 if ev.event_type in in_types:
                     tracked_qty += Decimal(ev.amount)
                     continue
-
+        
                 if ev.event_type in out_types:
-                    amount_out = Decimal(ev.amount)
-                    if amount_out - tracked_qty > EPS:
-                        deficit = amount_out - tracked_qty
-                        missing_qty += deficit
-                        tracked_qty += deficit  # after consolidation, we can "pay" this OUT
-                    tracked_qty -= amount_out
+                    tracked_qty -= Decimal(ev.amount)
                     continue
-
+        
+            # Current on-chain / snapshot balance for this token
+            current_balance = self._balance_snapshots_series.latest().balances_by_token.get(
+                token_address.lower(),
+                Decimal("0"),
+            )
+        
+            # If the history explains less than the current balance, we need a virtual IN lot.
+            missing_qty = current_balance - tracked_qty
+        
+            # Do not return negative missing qty: if tracked > balance, we don't "invent" OUT here.
+            if missing_qty <= EPS:
+                return Decimal("0")
+        
             return missing_qty
 
+
         # ---- 4) Consolidate the position once, up-front (no mutation of the real event history) ----
-        missing_qty = _compute_missing_qty_for_consolidation()
+        missing_qty = _compute_missing_qty_for_consolidation(token_address)
 
         if missing_qty > EPS:
             # This synthetic lot exists only in this calculation to reconcile the pool. It is intentionally traceable (synthetic event_id) but has no on-chain counterpart.
@@ -371,4 +403,16 @@ class PerformanceCalculator:
             # If the event type is neither IN nor OUT nor TRANSFER: we ignore it.
             continue
 
-        return realizations
+        # ---- 6) Compute final WAC and average holding days for the open position ----
+        final_total_qty = _pool_total_qty()
+        final_total_cost = _pool_total_cost()
+
+        if final_total_qty > 0:
+            final_weighted_avg_cost = final_total_cost / final_total_qty
+            final_avg_holding_days = _avg_holding_days(datetime.now(timezone.utc))
+        else:
+            final_weighted_avg_cost = Decimal("0")
+            final_avg_holding_days = 0.0
+        
+        return realizations, final_weighted_avg_cost, final_avg_holding_days
+

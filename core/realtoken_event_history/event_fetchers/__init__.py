@@ -1,4 +1,3 @@
-from .fetch_current_realtoken_balances import fetch_current_realtoken_balances
 from .fetch_liquidations_rmm_v3 import fetch_liquidations_rmm_v3
 from .fetch_realtoken_transfers import fetch_realtoken_transfers
 from .get_accepted_offers_by_buyer_datetime import get_accepted_offers_by_buyer_datetime

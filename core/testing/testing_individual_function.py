@@ -88,18 +88,40 @@ if TEST_NOW:
     detokenisations_events = extract_detokenisations(user_tranfers["data"]["outTransfers"], realtoken_history_data)
     #pprint(detokenisations_events)
 
-# ------ fetch_current_realtoken_balances --------
-TEST_NOW = False
+# ------ fetch_current_realtoken_balances_aggregated (fetch_current_realtoken_balances_the_graph and fetch_current_realtoken_balances_from_wrapper) --------
+TEST_NOW = True
 
-from core.realtoken_event_history.event_fetchers import fetch_current_realtoken_balances
+from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_the_graph, fetch_current_realtoken_balances_from_wrapper, fetch_current_realtoken_balances_aggregated
+from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
+from datetime import datetime, timezone
+from decimal import Decimal
 
 if TEST_NOW:
-    balances = fetch_current_realtoken_balances(
+    #balances_realtokens = fetch_current_realtoken_balances_the_graph(
+    #    REALTOKEN_GNOSIS_SUBGRAPH_ID,
+    #    THE_GRAPH_API_KEY,
+    #    ["0x296fB7Be365498cdE47079c302e82A82721953d6"]
+    #)
+    #balances_wrapper = fetch_current_realtoken_balances_from_wrapper(
+    #    RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID,
+    #    THE_GRAPH_API_KEY,
+    #    ["0x296fB7Be365498cdE47079c302e82A82721953d6"]
+    #)
+    balances = fetch_current_realtoken_balances_aggregated(
         REALTOKEN_GNOSIS_SUBGRAPH_ID,
+        RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID,
         THE_GRAPH_API_KEY,
-        WALLETS
+        ["0x296fB7Be365498cdE47079c302e82A82721953d6", "0x6C85cBF6807Cbe59830e8270Bfd8701c72348585"]
     )
     #pprint(balances)
+
+    snapshot_now = BalanceSnapshot(
+        as_of=datetime.now(timezone.utc),
+        balances_by_token=balances["data"],
+    )
+    balance_snapshots_series = BalanceSnapshotSeries([snapshot_now])
+    print(balance_snapshots_series.latest().balances_by_token.get("0x06d0e5aee443093ac5635b709c8a01342e59df19", Decimal("0")))
+
 
 
 # ------ get_accepted_offers_by_seller_datetime --------

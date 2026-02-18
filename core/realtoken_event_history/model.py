@@ -136,24 +136,28 @@ class RealtokenEvent:
     
     def __str__(self) -> str:
         price = (
-            f"{self.price_per_token:.6f}"
+            f"{self.price_per_token:.2f}"
             if self.price_per_token is not None
             else "N/A"
         )
+    
         total = (
-            f"{self.total_price:.6f}"
+            f"{self.total_price:.2f}"
             if self.total_price is not None
             else "N/A"
         )
     
+        amount = f"{self.amount:.2f}"
+    
         token_short = f"{self.token_address[:6]}…{self.token_address[-4:]}"
     
         return (
-            f"{self.event_type.value.upper():<14} "
-            f"{self.amount:>10} @ {price:<12} "
-            f"(total={total:<14}) "
+            f"{self.event_type.value.upper():<10} "
+            f"{amount:>8} @ {price:<10} "
+            f"(total = {total:<8}) "
             f"{self.timestamp.isoformat()} | "
-            f"token={token_short} "
+            f"token={token_short} | "
+            f"tx = {self.transaction_hash}"
         )
 
     

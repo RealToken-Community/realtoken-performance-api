@@ -25,7 +25,7 @@ POSTGRES_READER_USER_NAME = os.getenv("POSTGRES_READER_USER_NAME")
 POSTGRES_READER_USER_PASSWORD = os.getenv("POSTGRES_READER_USER_PASSWORD")
 POSTGRES_DATA = [POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_READER_USER_NAME, POSTGRES_READER_USER_PASSWORD]
 
-WALLET = "0x296fB7Be365498cdE47079c302e82A82721953d6"
+WALLET = "0x296fB7Be365498cdE47079c302e82A82721953d6" #"0x2Ce2830FC9e351BD23fDC54bB1BC992C68979C91" #"0x296fB7Be365498cdE47079c302e82A82721953d6"
 
 
 import json
@@ -40,10 +40,16 @@ from core.realtoken_event_history.event_fetchers import (
 from core.services.utilities import fetch_json, list_to_dict_by_uuid, get_pg_connection
 from core.services.get_all_user_linked_addresses import get_all_user_linked_addresses
 from config.settings import REALTOKENS_LIST_URL, REALTOKEN_HISTORY_URL
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_realt_purchases, normalize_detokenisation, normalize_yam_offers, normalize_liquidations_rmm_v3, extract_user_purchases_from_realt, extract_detokenisations
+from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_aggregated
+from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
 from core.performance.calculator import PerformanceCalculator
+
+
+
 
 # ----------- blockchain_ressources -----------
 with open('Ressources/blockchain_contracts.json', 'r') as blockchain_ressources_file:
@@ -105,39 +111,45 @@ realtoken_event_history.sort_events_by_timestamp()
 #with open("testing_history.json", "w", encoding="utf-8") as f:
 #    json.dump(data, f, indent=4, ensure_ascii=False)
 
-print(realtoken_event_history.count_events())
+#print(realtoken_event_history.count_events())
+
+
+# ------- BalanceSnapshotsSeries -------
+balances = fetch_current_realtoken_balances_aggregated(
+    REALTOKEN_GNOSIS_SUBGRAPH_ID,
+    RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID,
+    THE_GRAPH_API_KEY,
+    WALLETS
+)
+snapshot_now = BalanceSnapshot(
+    as_of=datetime.now(timezone.utc),
+    balances_by_token=balances["data"],
+)
+balance_snapshots_series = BalanceSnapshotSeries([snapshot_now])
+
 
 # ------ PerformanceCalculator ---------
 
-#token_address = to_checksum_address('0x5b25b13f39f57e5b370b793ef86c1207a12a18ce')
-#for ev in realtoken_event_history.events_for(token_address):
-#    print(ev)
+roi_calculator = PerformanceCalculator(realtoken_event_history, balance_snapshots_series)
 
-roi_calculator = PerformanceCalculator(realtoken_event_history)
 
-#for ev in roi_calculator._realizations_by_token['0x5B25b13F39F57E5B370B793ef86c1207A12a18Ce']:
-    #print(ev)
-#print(roi_calculator.realized_pnl_by_token['0x5B25b13F39F57E5B370B793ef86c1207A12a18Ce'])
-
+#print()
+#print('1610')
+#print(roi_calculator.unrealized_pnl_by_token.get(to_checksum_address('0xd88e8873e90f734c9d3e3519e9e87345478c1df2')))
+#print()
+#print('601 Milton')
+#print(roi_calculator.unrealized_pnl_by_token.get(to_checksum_address('0x2b683f8cc61de593f089bdddc01431c0d7ca2ee2')))
+#print()
+#print('5733 Neely')
+#print(roi_calculator.realized_pnl_by_token.get(to_checksum_address('0x70724f4332d7ee1918f71236c1746cdda732d90a')))
+#print()
+#print('19000 Fenton')
+#print(roi_calculator.realized_pnl_by_token.get(to_checksum_address('0xf7412e264fa85ae5e79ac3a4b64ce4669e32b98f')))
 print()
-print('1610')
-print(roi_calculator.realized_pnl_by_token.get(to_checksum_address('0xd88e8873e90f734c9d3e3519e9e87345478c1df2')))
-print()
-print('601 Milton')
-print(roi_calculator.realized_pnl_by_token.get(to_checksum_address('0x2b683f8cc61de593f089bdddc01431c0d7ca2ee2')))
-print()
-print('5733 Neely')
-print(roi_calculator.realized_pnl_by_token.get(to_checksum_address('0x70724f4332d7ee1918f71236c1746cdda732d90a')))
-print()
-print('19000 Fenton')
-print(roi_calculator.realized_pnl_by_token.get(to_checksum_address('0xf7412e264fa85ae5e79ac3a4b64ce4669e32b98f')))
-print()
-print('global')
+print('global realized')
 print(roi_calculator.global_realized_pnl)
+print()
+print('global unrealized')
+print(roi_calculator.global_unrealized_pnl)
 
-
-#for k,v in roi_calculator._realizations_by_token.items():
-#    print(k)
-#    for realization in v:
-#        print(realization)
 
