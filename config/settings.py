@@ -3,9 +3,6 @@
 from __future__ import annotations
 from pathlib import Path
 
-from dotenv import load_dotenv
-load_dotenv()
-
 FRENQUENCY_REALTOKENS_DATA_UPDATE = 2 # in days
 
 # RealToken public endpoints
