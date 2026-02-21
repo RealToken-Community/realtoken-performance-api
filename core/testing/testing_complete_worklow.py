@@ -5,7 +5,7 @@ python -m core.testing.testing_complete_worklow
 
 
 if __name__ == "__main__":
-    from core.services.logging_config import setup_logging
+    from config.logging_config_api import setup_logging
     setup_logging()
 
 from pprint import pprint
@@ -33,15 +33,14 @@ from eth_utils import to_checksum_address
 from core.realtoken_event_history.event_fetchers import (
     fetch_realtoken_transfers,
     fetch_liquidations_rmm_v3,
-    get_accepted_offers_by_buyer_datetime,
-    get_accepted_offers_by_seller_datetime,
-    fill_missing_owner_in_realtokens_data
+    fetch_yam_v1_events
 )
-from core.services.utilities import fetch_json, list_to_dict_by_uuid, get_pg_connection
+from job.fill_missing_owner_in_realtokens_data import fill_missing_owner_in_realtokens_data
+from job.utilities import sort_realtoken_history_in_place
+from core.services.utilities import fetch_json, list_to_dict_by_uuid
 from core.services.get_all_user_linked_addresses import get_all_user_linked_addresses
 from config.settings import REALTOKENS_LIST_URL, REALTOKEN_HISTORY_URL
 from datetime import datetime, timezone
-from decimal import Decimal
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_realt_purchases, normalize_detokenisation, normalize_yam_offers, normalize_liquidations_rmm_v3, extract_user_purchases_from_realt, extract_detokenisations
 from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_aggregated
@@ -58,6 +57,7 @@ with open('Ressources/blockchain_contracts.json', 'r') as blockchain_ressources_
 # ------- update_realtoken_data_with_owner ---------
 realtoken_data = list_to_dict_by_uuid(fetch_json(REALTOKENS_LIST_URL) or [])
 realtoken_history_data = list_to_dict_by_uuid(fetch_json(REALTOKEN_HISTORY_URL) or [])
+sort_realtoken_history_in_place(realtoken_history_data)
 realtoken_data = fill_missing_owner_in_realtokens_data(realtoken_data)
 
 # ------- get_all_user_linked_addresses --------
@@ -81,14 +81,8 @@ realt_purchases = extract_user_purchases_from_realt(user_tranfers["data"]["inTra
 # ------- extract_detokenisations_events ---------
 detokenisations_events = extract_detokenisations(user_tranfers["data"]["outTransfers"], realtoken_history_data)
 
-# ------ get_accepted_offers_by_seller_datetime --------
-# ------ get_accepted_offers_by_buyer_datetime --------
-pg_conn = get_pg_connection(*POSTGRES_DATA)
-try:
-    offers_seller = get_accepted_offers_by_seller_datetime(pg_conn, WALLETS, datetime(2023, 1, 1), datetime(2026, 1, 1))
-    offers_buyer = get_accepted_offers_by_buyer_datetime(pg_conn, WALLETS, datetime(2023, 1, 1), datetime(2026, 1, 1))
-finally:
-    pg_conn.close()
+# ------ fetch_yam_v1_events --------
+offers_seller, offers_buyer = fetch_yam_v1_events(WALLETS, datetime(2023, 1, 1), datetime(2026, 1, 1), POSTGRES_DATA)
 
 # ----- fetch_liquidations_rmm_v3 --------
 rmmv3_liquidations = fetch_liquidations_rmm_v3(
@@ -97,14 +91,22 @@ rmmv3_liquidations = fetch_liquidations_rmm_v3(
     WALLETS
 )
 
+
+
+# ---- normalize data for the realtoken_event_history -----
+normalized_realt_purchases = normalize_realt_purchases(realt_purchases)
+normalized_yam_offers = normalize_yam_offers(offers_buyer + offers_seller, WALLETS, blockchain_ressources, realtoken_data)
+normalized_liquidations_rmm_v3 = normalize_liquidations_rmm_v3(rmmv3_liquidations, WALLETS, realtoken_history_data)
+normalized_detokenisation = normalize_detokenisation(detokenisations_events)
+
+
+
 # ------ RealtokenEventHistory --------
 realtoken_event_history = RealtokenEventHistory()
-
-# normalize data into the realtoken_event_history
-normalize_realt_purchases(realt_purchases, realtoken_event_history)
-normalize_yam_offers(offers_buyer + offers_seller, realtoken_event_history, WALLETS, blockchain_ressources, realtoken_data)
-normalize_liquidations_rmm_v3(rmmv3_liquidations, realtoken_event_history, WALLETS, realtoken_history_data)
-normalize_detokenisation(detokenisations_events, realtoken_event_history)
+realtoken_event_history.add(normalized_realt_purchases)
+realtoken_event_history.add(normalized_yam_offers)
+realtoken_event_history.add(normalized_liquidations_rmm_v3)
+realtoken_event_history.add(normalized_detokenisation)
 realtoken_event_history.sort_events_by_timestamp()
 
 #data = realtoken_event_history.as_dict_serialized()

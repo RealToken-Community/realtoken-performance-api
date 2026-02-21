@@ -1,35 +1,34 @@
 from __future__ import annotations
-from decimal import Decimal
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Sequence
-from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType, RealtokenEvent
-from core.realtoken_event_history.event_fetchers import get_liquidatied_realtoken_rmmV3_by_tx
-from core.services.utilities import get_token_price_at_timestamp
-from zoneinfo import ZoneInfo
-from config.settings import LIQUIDATION_BONUS
 
 import logging
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, Dict, Iterable, Sequence, Tuple
+
+from config.settings import LIQUIDATION_BONUS
+from core.realtoken_event_history.event_fetchers import get_liquidatied_realtoken_rmmV3_by_tx
+from core.realtoken_event_history.model import RealtokenEvent, RealtokenEventType
+from core.services.utilities import get_token_price_at_timestamp
+
 logger = logging.getLogger(__name__)
 
 REALTOKEN_DECIMALS = 18
-PARIS_TZ = ZoneInfo("Europe/Paris")
 
 
 def normalize_liquidations_rmm_v3(
-    liquidations: Iterable[Dict[str, Any]],
-    history: RealtokenEventHistory,
+    liquidations: Iterable[Dict[str, Any]] | Dict[str, Any],
     user_wallets: Sequence[str],
-    realtoken_history_data: Dict[str, Dict[str, Any]]
-) -> None:
+    realtoken_history_data: Dict[str, Dict[str, Any]],
+) -> Tuple[RealtokenEvent, ...]:
     """
     Normalize RMM v3 LiquidationCall objects into *multiple* atomic RealtokenEvent entries
-    (one for each RealToken liquidated).
+    (one for each RealToken liquidated) and return them as an immutable tuple.
 
-    Each liquidation contains N movements:
-      - assets are in `reserves` (list of objects with `id`)
-      - amounts are in `amounts` (list of bigint-as-string)
-    We create 1 RealtokenEvent per (reserve, amount) pair (zip by index).
-
+    Notes:
+    - Some tx may be incomplete in subgraph data (reserves != amounts). Those tx hashes are collected
+      and resolved via get_liquidatied_realtoken_rmmV3_by_tx(), then normalized too.
+    - Synthetic log_index is derived from the asset order (mov_idx).
+        
     Event type rules:
       - If `liquidator.id` is in `user_wallets` => event_type = LIQUIDATION
       - If `user.id`       is in `user_wallets` => event_type = LIQUIDATED
@@ -40,7 +39,6 @@ def normalize_liquidations_rmm_v3(
       - destination = liquidator (liquidator.id)
 
     Uniqueness / log_index notes:
-      - history.add() deduplicates by (transaction_hash, log_index).
       - A single on-chain tx can contain:
           (a) multiple LiquidationCall "groups" (multiple liquidation objects),
           (b) and each group contains multiple movements (N assets).
@@ -49,18 +47,19 @@ def normalize_liquidations_rmm_v3(
         It is not a real logIndex, but an artificial one 
       - This guarantees stable, collision-free indices while preserving ordering.
     """
-
     wallets_lc = {w.lower() for w in user_wallets if w}
 
     # Accept both:
     # - an iterable of liquidation dicts
     # - or the raw fetch payload dict (e.g. {"items": [...]})
     if isinstance(liquidations, dict):
-        liquidations = liquidations.get("items", [])
+        liquidations_iter: Iterable[Dict[str, Any]] = liquidations.get("items", []) or []
+    else:
+        liquidations_iter = liquidations
 
-    # Group by txHash so we can assign a stable "liquidation_sequence_in_tx"
+    # Group by txHash so we can assign stable ordering per tx
     by_tx: dict[str, list[Dict[str, Any]]] = {}
-    for liq in liquidations:
+    for liq in liquidations_iter:
         if not isinstance(liq, dict):
             raise TypeError(f"Each liquidation must be a dict, got: {type(liq).__name__}")
 
@@ -69,11 +68,11 @@ def normalize_liquidations_rmm_v3(
             continue
         by_tx.setdefault(tx, []).append(liq)
 
-    tx_incomplete_data = []  # Some transactions are not correctly indexed by TheGraph. When detected, we collect their tx hashes to fall back to alternative liquidation data sources.
+    normalized_events: list[RealtokenEvent] = []
+    tx_incomplete_data: list[str] = []
 
     for tx_hash, liqs in by_tx.items():
-        # Stable ordering inside a tx: (timestamp, id) is deterministic enough for subgraph outputs
-        # and keeps the sequence stable across runs.
+        # Stable ordering inside a tx
         liqs.sort(key=lambda x: (int(x.get("timestamp") or 0), str(x.get("id") or "")))
 
         for liq in liqs:
@@ -93,12 +92,12 @@ def normalize_liquidations_rmm_v3(
                     "Unexpected liquidation where BOTH user and liquidator are in user_wallets. "
                     f"tx={tx_hash} user={user_id} liquidator={liquidator_id}"
                 )
+
             if is_liquidator_user:
                 event_type = RealtokenEventType.LIQUIDATION
             elif is_liquidated_user:
                 event_type = RealtokenEventType.LIQUIDATED
             else:
-                # If your fetch is already filtered, this shouldn't happen; keep safe.
                 continue
 
             reserves = liq.get("reserves") or []
@@ -106,9 +105,12 @@ def normalize_liquidations_rmm_v3(
 
             if len(reserves) != len(amounts):
                 logger.warning(
-                    f"Liquidation data inconsistency detected: reserves({len(reserves)}) != amounts({len(amounts)}) "
-                    f"tx={tx_hash} id={liq.get('id')}. "
-                    f"Subgraph data appears incomplete; using fallback retrieval method"
+                    "Liquidation data inconsistency detected: reserves(%s) != amounts(%s) tx=%s id=%s. "
+                    "Subgraph data appears incomplete; using fallback retrieval method",
+                    len(reserves),
+                    len(amounts),
+                    tx_hash,
+                    liq.get("id"),
                 )
                 tx_incomplete_data.append(tx_hash)
                 continue
@@ -118,69 +120,82 @@ def normalize_liquidations_rmm_v3(
                 if not token_addr:
                     continue
 
-                decimals = REALTOKEN_DECIMALS
-
                 # BigInt-as-string -> Decimal in human units
                 raw_amount = Decimal(amount_str)
-                amount = raw_amount / (Decimal(10) ** decimals)
-
-                # sometimes amount can be 0 -> skip
+                amount = raw_amount / (Decimal(10) ** REALTOKEN_DECIMALS)
                 if amount <= 0:
                     continue
 
-                # price
-                price_per_token = get_token_price_at_timestamp(realtoken_history_data, token_addr.lower(), ts) / (LIQUIDATION_BONUS)
+                # price (apply liquidation bonus)
+                price = get_token_price_at_timestamp(
+                    realtoken_history_data,
+                    token_addr.lower(),
+                    ts,
+                )
+                if price is None:
+                    # depending on your function signature; keep safe
+                    continue
+                price_per_token = Decimal(price) / Decimal(LIQUIDATION_BONUS)
 
-                # Deterministic synthetic log_index per movement: not a real logIndex, but an artificial one derived from the asset order
-                log_index = mov_idx
-
-                event = RealtokenEvent(
-                    token_address=token_addr,
-                    amount=amount,
-                    source=user_id,
-                    destination=liquidator_id,
-                    timestamp=ts,
-                    transaction_hash=tx_hash,
-                    log_index=int(log_index),
-                    event_type=event_type,
-                    price_per_token=Decimal(price_per_token),
+                normalized_events.append(
+                    RealtokenEvent(
+                        token_address=token_addr,
+                        amount=amount,
+                        source=user_id,
+                        destination=liquidator_id,
+                        timestamp=ts,
+                        transaction_hash=tx_hash,
+                        log_index=int(mov_idx),  # synthetic
+                        event_type=event_type,
+                        price_per_token=price_per_token,
+                    )
                 )
 
-                history.add(event)
-    
-    liq_data_alterante_source = get_liquidatied_realtoken_rmmV3_by_tx(tx_incomplete_data)
+    # ---- Fallback for incomplete txs ----
+    if tx_incomplete_data:
+        liq_data_alternative_source = get_liquidatied_realtoken_rmmV3_by_tx(tx_incomplete_data)
 
-    for liq in liq_data_alterante_source:
-        tx_hash   = liq["tx_hash"]
-        timestamp = liq["timestamp"]
-        user      = liq["user"]
-        liquidator = liq["liquidator"]
+        for liq in liq_data_alternative_source:
+            tx_hash = liq["tx_hash"]
+            timestamp = liq["timestamp"]
+            user = liq["user"]
+            liquidator = liq["liquidator"]
 
-        assets  = liq["collateral_assets"]
-        amounts = liq["collateral_amounts"]
+            assets = liq["collateral_assets"]
+            amounts = liq["collateral_amounts"]
 
-        for i, (asset, raw_amount) in enumerate(zip(assets, amounts)):
-            # Skip empty collateral entries
-            if raw_amount == 0:
-                continue
+            # ensure timestamp is UTC-aware
+            if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-            # BigInt-as-string -> Decimal in human units
-            raw_amount = Decimal(raw_amount)
-            amount = raw_amount / (Decimal(10) ** decimals)
+            for i, (asset, raw_amount) in enumerate(zip(assets, amounts)):
+                if raw_amount == 0:
+                    continue
 
-            # price
-            price_per_token = get_token_price_at_timestamp(realtoken_history_data, asset.lower(), timestamp) / (LIQUIDATION_BONUS)
+                raw_amount_dec = Decimal(raw_amount)
+                amount = raw_amount_dec / (Decimal(10) ** REALTOKEN_DECIMALS)
 
-            event = RealtokenEvent(
-                token_address=asset,
-                amount=Decimal(amount),
-                source=user,
-                destination=liquidator,
-                timestamp=timestamp,
-                transaction_hash=f"0x{tx_hash}",
-                log_index=i,
-                event_type=RealtokenEventType.LIQUIDATION,
-                price_per_token=Decimal(price_per_token),
-            )
+                price = get_token_price_at_timestamp(
+                    realtoken_history_data,
+                    str(asset).lower(),
+                    timestamp,
+                )
+                if price is None:
+                    continue
+                price_per_token = Decimal(price) / Decimal(LIQUIDATION_BONUS)
 
-            history.add(event)
+                normalized_events.append(
+                    RealtokenEvent(
+                        token_address=str(asset).lower(),
+                        amount=Decimal(amount),
+                        source=str(user).lower(),
+                        destination=str(liquidator).lower(),
+                        timestamp=timestamp,
+                        transaction_hash=f"0x{tx_hash}",
+                        log_index=int(i),
+                        event_type=RealtokenEventType.LIQUIDATION,
+                        price_per_token=price_per_token,
+                    )
+                )
+
+    return tuple(normalized_events)

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime
 from collections import defaultdict
-from typing import Optional
+from typing import Optional, Iterable, Union
 from eth_utils import to_checksum_address, is_address
 from enum import Enum
 import re
@@ -193,18 +193,31 @@ class RealtokenEventHistory:
         self._events_by_token: dict[str, list[RealtokenEvent]] = defaultdict(list)
         self._seen_events: set[tuple[str, int]] = set()
 
-    def add(self, event: RealtokenEvent) -> None:
+    def add(
+        self,
+        events: Union[RealtokenEvent, Iterable[RealtokenEvent]],
+    ) -> None:
         """
-        Add a single event to the history.
-    
+        Add one or multiple events to the history.
+
         An event is uniquely identified by (transaction_hash, log_index).
         Duplicate events are silently ignored.
         """
+        if isinstance(events, RealtokenEvent):
+            self._add_one(events)
+        else:
+            for event in events:
+                self._add_one(event)
+
+    def _add_one(self, event: RealtokenEvent) -> None:
+        """
+        Internal helper to add a single event.
+        """
         event_id = (event.transaction_hash, event.log_index)
-    
+
         if event_id in self._seen_events:
             return  # already added
-    
+
         self._seen_events.add(event_id)
         self._events_by_token[event.token_address].append(event)
 

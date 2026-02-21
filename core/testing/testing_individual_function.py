@@ -5,7 +5,7 @@ Set to 'True' the variable 'TEST_NOW' for each section you want to test
 '''
 
 if __name__ == "__main__":
-    from core.services.logging_config import setup_logging
+    from config.logging_config_api import setup_logging
     setup_logging()
 
 from pprint import pprint
@@ -25,7 +25,7 @@ POSTGRES_READER_USER_NAME = os.getenv("POSTGRES_READER_USER_NAME")
 POSTGRES_READER_USER_PASSWORD = os.getenv("POSTGRES_READER_USER_PASSWORD")
 POSTGRES_DATA = [POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_READER_USER_NAME, POSTGRES_READER_USER_PASSWORD]
 
-#WALLETS = ["0xa22dc341c8dd53Ab1Dff6e66228e779832a449BF", "0x296fB7Be365498cdE47079c302e82A82721953d6", "0xA99e07efB152321117653a16727BF6Bc02106892", "0x6C85cBF6807Cbe59830e8270Bfd8701c72348585"]
+WALLETS = ["0xa22dc341c8dd53Ab1Dff6e66228e779832a449BF", "0x296fB7Be365498cdE47079c302e82A82721953d6", "0xA99e07efB152321117653a16727BF6Bc02106892", "0x6C85cBF6807Cbe59830e8270Bfd8701c72348585"]
 
 
 # ------- get_all_user_linked_addresses --------
@@ -41,7 +41,7 @@ if TEST_NOW:
 
 # ------- fetch_realtoken_transfers --------
 
-TEST_NOW = False
+TEST_NOW = True
 
 from core.realtoken_event_history.event_fetchers import fetch_realtoken_transfers
 
@@ -57,21 +57,23 @@ if TEST_NOW:
 
 # ------- update_realtoken_data_with_owner ---------
 
-TEST_NOW = False
+TEST_NOW = True
 
 from core.services.utilities import fetch_json, list_to_dict_by_uuid
 from config.settings import REALTOKENS_LIST_URL, REALTOKEN_HISTORY_URL
-from core.realtoken_event_history.event_fetchers import fill_missing_owner_in_realtokens_data
+from job.fill_missing_owner_in_realtokens_data import fill_missing_owner_in_realtokens_data
+from job.utilities import sort_realtoken_history_in_place
 
 if TEST_NOW:
     realtoken_data = list_to_dict_by_uuid(fetch_json(REALTOKENS_LIST_URL) or [])
     realtoken_history_data = list_to_dict_by_uuid(fetch_json(REALTOKEN_HISTORY_URL) or [])
+    sort_realtoken_history_in_place(realtoken_history_data)
     realtoken_data = fill_missing_owner_in_realtokens_data(realtoken_data)
     #pprint(realtoken_data)
 
 
 # ------- compute_purchases_from_realt ---------
-TEST_NOW = False
+TEST_NOW = True
 
 from core.realtoken_event_history.event_normalizers.extract_user_purchases_from_realt import extract_user_purchases_from_realt
 
@@ -80,7 +82,7 @@ if TEST_NOW:
     #pprint(realt_purchases)
 
 # ------- compute_detokenisation ---------
-TEST_NOW = False
+TEST_NOW = True
 
 from core.realtoken_event_history.event_normalizers.extract_detokenisations import extract_detokenisations
 
@@ -89,7 +91,7 @@ if TEST_NOW:
     #pprint(detokenisations_events)
 
 # ------ fetch_current_realtoken_balances_aggregated (fetch_current_realtoken_balances_the_graph and fetch_current_realtoken_balances_from_wrapper) --------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_the_graph, fetch_current_realtoken_balances_from_wrapper, fetch_current_realtoken_balances_aggregated
 from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
@@ -124,27 +126,19 @@ if TEST_NOW:
 
 
 
-# ------ get_accepted_offers_by_seller_datetime --------
-# ------ get_accepted_offers_by_buyer_datetime --------
-TEST_NOW = False
+# ------ fetch_yam_v1_events --------
+TEST_NOW = True
 
-from core.realtoken_event_history.event_fetchers import get_accepted_offers_by_buyer_datetime
-from core.realtoken_event_history.event_fetchers import get_accepted_offers_by_seller_datetime
-from core.services.utilities import get_pg_connection
+from core.realtoken_event_history.event_fetchers import fetch_yam_v1_events
 from datetime import datetime
 
 if TEST_NOW:
-    pg_conn = get_pg_connection(*POSTGRES_DATA)
-    try:
-        offers_seller = get_accepted_offers_by_seller_datetime(pg_conn, WALLETS, datetime(2023, 1, 1), datetime(2026, 1, 1))
-        offers_buyer = get_accepted_offers_by_buyer_datetime(pg_conn, WALLETS, datetime(2023, 1, 1), datetime(2026, 1, 1))
-    finally:
-        pg_conn.close()
+    offers_seller, offers_buyer = fetch_yam_v1_events(WALLETS, datetime(2023, 1, 1), datetime(2026, 1, 1), POSTGRES_DATA)
     pprint(len(offers_seller))
     pprint(len(offers_buyer))
 
 # ----- fetch_liquidations_rmm_v3 --------
-TEST_NOW = False
+TEST_NOW = True
 
 from core.realtoken_event_history.event_fetchers import fetch_liquidations_rmm_v3
 if TEST_NOW:
@@ -157,47 +151,50 @@ if TEST_NOW:
     #print(rmmv3_liquidations["count"])
 
 
-# ------ RealtokenEventHistory and normalize_realt_purchases--------
-TEST_NOW = False
+# ------ normalize_realt_purchases--------
+TEST_NOW = True
 
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_realt_purchases
 if TEST_NOW:
+    normalized_realt_purchases =  normalize_realt_purchases(realt_purchases)
     realtoken_event_history = RealtokenEventHistory()
-    normalize_realt_purchases(realt_purchases, realtoken_event_history)
+    realtoken_event_history.add(normalized_realt_purchases)
     pprint(realtoken_event_history.as_dict())
     print(len(realtoken_event_history.tokens()))
 
 
-# ------ RealtokenEventHistory and normalize_detokenisation--------
-TEST_NOW = False
+# ------ normalize_detokenisation--------
+TEST_NOW = True
 
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_detokenisation
 if TEST_NOW:
+    normalized_detokenisation = normalize_detokenisation(detokenisations_events)
     realtoken_event_history = RealtokenEventHistory()
-    normalize_detokenisation(detokenisations_events, realtoken_event_history)
+    realtoken_event_history.add(normalized_detokenisation)
     for k, v in realtoken_event_history.as_dict().items():
         for ev in v:
             print(ev)
     print(len(realtoken_event_history.tokens()))
 
 
-# ------ RealtokenEventHistory and normalize_internal_transfer--------
-TEST_NOW = False
+# ------ normalize_internal_transfer--------
+TEST_NOW = True
 
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_internal_transfer
 if TEST_NOW:
+    normalized_internal_transfer = normalize_internal_transfer(user_tranfers, WALLETS)
     realtoken_event_history = RealtokenEventHistory()
-    normalize_internal_transfer(user_tranfers, realtoken_event_history, WALLETS)
+    realtoken_event_history.add(normalized_internal_transfer)
     pprint(realtoken_event_history.as_dict())
     print(len(realtoken_event_history.tokens()))
 
 
 
-# ------ RealtokenEventHistory and normalize_yam_offers--------
-TEST_NOW = False
+# ------ normalize_yam_offers--------
+TEST_NOW = True
 
 from core.realtoken_event_history.event_normalizers import normalize_yam_offers
 import json
@@ -205,20 +202,23 @@ if TEST_NOW:
     realtoken_data = list_to_dict_by_uuid(fetch_json(REALTOKENS_LIST_URL) or [])
     with open('Ressources/blockchain_contracts.json', 'r') as blockchain_ressources_file:
         blockchain_ressources = json.load(blockchain_ressources_file)['contracts']
+    normalized_yam_offers = normalize_yam_offers(offers_buyer + offers_seller, WALLETS, blockchain_ressources, realtoken_data)
     realtoken_event_history = RealtokenEventHistory()
-    normalize_yam_offers(offers_buyer + offers_seller, realtoken_event_history, WALLETS, blockchain_ressources, realtoken_data)
+    realtoken_event_history.add(normalized_yam_offers)
     #pprint(realtoken_event_history.as_dict())
     print(len(realtoken_event_history.tokens()))
     pprint(realtoken_event_history.events_for_tx('0x7b8b3c020c63e421f41b45dd92e7a2d084ce036155389b4f75e4b87af3280f06'))
 
-# ------ RealtokenEventHistory and normalize_liquidations_rmm_v3--------
-TEST_NOW = False
+# ------ normalize_liquidations_rmm_v3--------
+TEST_NOW = True
 
 from core.realtoken_event_history.event_normalizers import normalize_liquidations_rmm_v3
 if TEST_NOW:
     realtoken_history_data = list_to_dict_by_uuid(fetch_json(REALTOKEN_HISTORY_URL) or [])
+    sort_realtoken_history_in_place(realtoken_history_data)
+    normalized_liquidations_rmm_v3 = normalize_liquidations_rmm_v3(rmmv3_liquidations, WALLETS, realtoken_history_data)
     realtoken_event_history = RealtokenEventHistory()
-    normalize_liquidations_rmm_v3(rmmv3_liquidations, realtoken_event_history, WALLETS, realtoken_history_data)
+    realtoken_event_history.add(normalized_liquidations_rmm_v3)
     pprint(realtoken_event_history.as_dict())
 
 
