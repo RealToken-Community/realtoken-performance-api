@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Tuple, Iterable
-
+from typing import Optional, Tuple, Iterable, Any, Dict
 
 EventId = Tuple[str, int]  # (transaction_hash, log_index)
 
@@ -197,6 +196,22 @@ class RealizedPnLIndicator:
     # ------------------------------------------------------------------
     # Representation methods
     # ------------------------------------------------------------------
+    
+    def to_dict(self, places: int = 4) -> Dict[str, Any]:
+        q = Decimal("1").scaleb(-places)
+
+        def r(x: Optional[Decimal]) -> Optional[Decimal]:
+            return x.quantize(q) if x is not None else None
+
+        return {
+            "annualized_return_pct": r(self.annualized_return_pct),
+            "return_pct": r(self.return_pct),
+            "realized_pnl": r(self.realized_pnl),
+            "total_cost_basis_out": r(self.total_cost_basis_out),
+            "total_out_value": r(self.total_out_value),
+            "avg_holding_days": round(self.avg_holding_days, 2) if self.avg_holding_days is not None else None,
+            "realization_count": self.realization_count,
+        }
 
     def __repr__(self) -> str:
         return (
@@ -345,6 +360,24 @@ class UnrealizedPnLIndicator:
     # ------------------------------------------------------------------
     # Representation methods
     # ------------------------------------------------------------------
+
+    def to_dict(self, places: int = 4) -> Dict[str, Any]:
+        q = Decimal("1").scaleb(-places)
+
+        def r(x: Optional[Decimal]) -> Optional[Decimal]:
+            return x.quantize(q) if x is not None else None
+
+        return {
+            "annualized_return_pct": r(self.annualized_return_pct),
+            "return_pct": r(self.return_pct),
+            "unrealized_pnl": r(self.unrealized_pnl),
+            "cost_basis": r(self.cost_basis),
+            "current_value": r(self.current_value),
+            "avg_holding_days": round(self.avg_holding_days, 2) if self.avg_holding_days is not None else None,
+            "quantity": r(self.current_quantity),
+            "current_price": r(self.current_price),
+            "avg_cost_per_token": r(self.avg_cost_per_token),
+        }
 
     def __repr__(self) -> str:
         return (
