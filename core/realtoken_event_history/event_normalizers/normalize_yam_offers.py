@@ -134,11 +134,11 @@ def normalize_yam_offers(
                 price_per_token = None
             else:
                 if mode == 1:
-                    event_type = RealtokenEventType.SELL_YAM
+                    event_type = RealtokenEventType.SELL_YAM_V1
                     source = buyer
                     destination = seller
                 else:  # mode == 2
-                    event_type = RealtokenEventType.BUY_YAM
+                    event_type = RealtokenEventType.BUY_YAM_V1
                     source = seller
                     destination = buyer
 
@@ -171,11 +171,11 @@ def normalize_yam_offers(
                 price_per_token = None
             else:
                 if mode == 4:
-                    event_type = RealtokenEventType.SELL_YAM
+                    event_type = RealtokenEventType.SELL_YAM_V1
                     source = seller
                     destination = buyer
                 else:  # mode == 3
-                    event_type = RealtokenEventType.BUY_YAM
+                    event_type = RealtokenEventType.BUY_YAM_V1
                     source = buyer
                     destination = seller
 
