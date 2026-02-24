@@ -1,0 +1,24 @@
+services:
+  realtokens-performance-api:
+    build: .
+    container_name: realtokens-performance-api
+
+    env_file:
+      - .env
+
+    volumes:
+      - realtokens-performance-logs:/app/logs
+
+    ports:
+      - "${API_PORT_INTERNAL}:${API_PORT_INTERNAL}"
+
+    restart: unless-stopped
+    networks:
+      - yam-events-db-shared-network
+
+volumes:
+  realtokens-performance-logs:
+
+networks:
+  yam-events-db-shared-network:
+    external: true
