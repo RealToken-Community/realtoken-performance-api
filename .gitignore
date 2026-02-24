@@ -63,6 +63,7 @@ Thumbs.db
 *.tmp
 *.bak
 *.orig
+data_tmp/*
 
 
 # =========================
