@@ -6,18 +6,10 @@ from typing import List, Dict, Optional, Tuple
 from eth_utils import to_checksum_address
 
 from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
-from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
+from core.balance_snapshots.model import BalanceSnapshotSeries
 from core.performance.model import Realization, RealizedPnLIndicator, UnrealizedPnLIndicator
 from core.services.utilities import get_token_issuance_timestamp, get_token_price_at_timestamp
-
-
-
-
-
-
-from core.services.utilities import fetch_json, list_to_dict_by_uuid
-from config.settings import REALTOKEN_HISTORY_URL
-realtoken_history_data = list_to_dict_by_uuid(fetch_json(REALTOKEN_HISTORY_URL) or [])
+from job.utilities import load_json
 
 
 class PerformanceCalculator:
@@ -29,6 +21,9 @@ class PerformanceCalculator:
     """
 
     def __init__(self, history: RealtokenEventHistory, balance_snapshots_series: BalanceSnapshotSeries) -> None:
+        
+        self.realtoken_history = load_json("data_tmp/realtokens_history.json")
+        
         self._history = history
         self._balance_snapshots_series = balance_snapshots_series
 
@@ -66,7 +61,7 @@ class PerformanceCalculator:
             realized_pnl_by_token[token_address] = RealizedPnLIndicator(realizations_by_token[token_address])
 
             # Build a Unrealized PnL for every token present in the history
-            current_price = Decimal(get_token_price_at_timestamp(realtoken_history_data, token_address, datetime.now(timezone.utc)))
+            current_price = Decimal(get_token_price_at_timestamp(self.realtoken_history, token_address, datetime.now(timezone.utc)))
             current_quantity = self._balance_snapshots_series.latest().balances_by_token.get(token_address.lower(), Decimal("0"))
             unrealized_pnl_by_token[token_address] = UnrealizedPnLIndicator(current_price, current_quantity, final_weighted_avg_cost, final_avg_holding_days)
 
@@ -135,14 +130,14 @@ class PerformanceCalculator:
         # IN events are acquisitions that increase the position and define the WAC.
         in_types = {
             RealtokenEventType.BUY_FROM_REALT,
-            RealtokenEventType.BUY_YAM,
+            RealtokenEventType.BUY_YAM_V1,
             RealtokenEventType.LIQUIDATION,
             RealtokenEventType.BUY_SWAPCAT,
         }
 
         # OUT events are disposals that realize PnL (sell/detokenisation...).
         out_types = {
-            RealtokenEventType.SELL_YAM,
+            RealtokenEventType.SELL_YAM_V1,
             RealtokenEventType.SELL_SWAPCAT,
             RealtokenEventType.LIQUIDATED,
             RealtokenEventType.DETOKENISATION,
@@ -304,8 +299,8 @@ class PerformanceCalculator:
 
         if missing_qty > EPS:
             # This synthetic lot exists only in this calculation to reconcile the pool. It is intentionally traceable (synthetic event_id) but has no on-chain counterpart.
-            insuance_timestamp = get_token_issuance_timestamp(realtoken_history_data, token_address)
-            token_price_at_insuance_timestamp = get_token_price_at_timestamp(realtoken_history_data, token_address, insuance_timestamp)
+            insuance_timestamp = get_token_issuance_timestamp(self.realtoken_history, token_address)
+            token_price_at_insuance_timestamp = get_token_price_at_timestamp(self.realtoken_history, token_address, insuance_timestamp)
             ts = insuance_timestamp.replace(tzinfo=timezone.utc) if insuance_timestamp.tzinfo is None else insuance_timestamp.timestamp.astimezone(timezone.utc)
             consolidation_lot = {
                 "event_id": ("__consolidation__", 0),
