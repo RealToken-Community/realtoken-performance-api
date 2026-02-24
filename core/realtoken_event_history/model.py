@@ -27,12 +27,12 @@ _TX_HASH_REGEX = re.compile(r"^0x[a-fA-F0-9]{64}$")
 
 
 class RealtokenEventType(str, Enum):
-    BUY_FROM_REALT = "buy_from_realt"
-    BUY_YAM = "buy_yam"
-    SELL_YAM = "sell_yam"
-    BUY_SWAPCAT = "buy_swapcat"
-    SELL_SWAPCAT = "sell_swapcat"
-    TRANSFER = "internal_transfer"
+    BUY_FROM_REALT = "buy from realt"
+    BUY_YAM_V1 = "buy yam"
+    SELL_YAM_V1 = "sell yam"
+    BUY_SWAPCAT = "buy swapcat"
+    SELL_SWAPCAT = "sell swapcat"
+    TRANSFER = "internal transfer"
     LIQUIDATION = "liquidation"
     LIQUIDATED = "liquidated"
     DETOKENISATION = "detokenisation"
@@ -65,8 +65,8 @@ class RealtokenEvent:
         object.__setattr__(self, "token_address", to_checksum_address(self.token_address))
         
         # ---- amount ----
-        if self.amount <= 0:
-            raise ValueError("amount must be strictly positive")
+        if self.amount < 0:
+            raise ValueError(f"amount must be positive: amount = {self.amount}. tx = {self.transaction_hash}")
 
         # ---- addresses ----
         if not is_address(self.source):
