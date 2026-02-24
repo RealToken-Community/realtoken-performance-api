@@ -91,7 +91,7 @@ def get_token_price_at_timestamp(
 
     # History is already sorted chronologically (YYYYMMDD) at data load time
     hist_sorted = history
-    
+
     # Parse first date
     first_date_str = hist_sorted[0].get("date")
     if not first_date_str:
@@ -191,3 +191,12 @@ def get_pg_connection(pg_host, pg_port, pg_db, pg_user, pg_password) -> PGConnec
         connect_timeout=10,
     )
 
+def test_postgres_connection(POSTGRES_DATA) -> bool:
+    try:
+        conn = get_pg_connection(*POSTGRES_DATA)
+        conn.close()
+        return True
+    except Exception as e:
+        send_telegram_alert(f"roi calculator api: Postgres DB connection failed")
+        logger.exception(f"Postgres connection failed")
+        return False
