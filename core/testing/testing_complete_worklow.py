@@ -113,7 +113,7 @@ realtoken_event_history.sort_events_by_timestamp()
 #with open("testing_history.json", "w", encoding="utf-8") as f:
 #    json.dump(data, f, indent=4, ensure_ascii=False)
 
-#print(realtoken_event_history.count_events())
+print(realtoken_event_history.count_events())
 
 
 # ------- BalanceSnapshotsSeries -------

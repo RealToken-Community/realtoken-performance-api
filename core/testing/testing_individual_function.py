@@ -1,7 +1,7 @@
 '''
 use this command to test the function of your choice:
 python -m core.testing.testing_individual_function
-Set to 'True' the variable 'TEST_NOW' for each section you want to test
+Set to 'False' the variable 'TEST_NOW' for each section you want to test
 '''
 
 if __name__ == "__main__":
@@ -11,6 +11,7 @@ if __name__ == "__main__":
 from pprint import pprint
 from dotenv import load_dotenv
 import os
+import time
 load_dotenv() 
 
 THE_GRAPH_API_KEY = os.getenv("THE_GRAPH_API_KEY")
@@ -35,17 +36,18 @@ TEST_NOW = False
 from core.services.get_all_user_linked_addresses import get_all_user_linked_addresses
 
 if TEST_NOW:
-    WALLETS = get_all_user_linked_addresses("0x296fB7Be365498cdE47079c302e82A82721953d6", THE_GRAPH_API_KEY, REALTOKEN_GNOSIS_SUBGRAPH_ID)
+    WALLETS = get_all_user_linked_addresses("0xab1c40889175ea24b83175d9e09ee335ddf5a1ab", THE_GRAPH_API_KEY, REALTOKEN_GNOSIS_SUBGRAPH_ID)
     print(WALLETS)
 
 
 # ------- fetch_realtoken_transfers --------
 
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_fetchers import fetch_realtoken_transfers
 
 if TEST_NOW:
+    start = time.perf_counter()
     user_tranfers = fetch_realtoken_transfers(
         REALTOKEN_GNOSIS_SUBGRAPH_ID,
         THE_GRAPH_API_KEY,
@@ -53,11 +55,12 @@ if TEST_NOW:
     )
     #pprint(user_tranfers['data']['outTransfers'])
     #pprint(user_tranfers['data']['inTransfers'])
+    print(time.perf_counter()-start)
 
 
 # ------- update_realtoken_data_with_owner ---------
 
-TEST_NOW = True
+TEST_NOW = False
 
 from core.services.utilities import fetch_json, list_to_dict_by_uuid
 from config.settings import REALTOKENS_LIST_URL, REALTOKEN_HISTORY_URL
@@ -73,7 +76,7 @@ if TEST_NOW:
 
 
 # ------- compute_purchases_from_realt ---------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_normalizers.extract_user_purchases_from_realt import extract_user_purchases_from_realt
 
@@ -82,7 +85,7 @@ if TEST_NOW:
     #pprint(realt_purchases)
 
 # ------- compute_detokenisation ---------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_normalizers.extract_detokenisations import extract_detokenisations
 
@@ -127,7 +130,7 @@ if TEST_NOW:
 
 
 # ------ fetch_yam_v1_events --------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_fetchers import fetch_yam_v1_events
 from datetime import datetime
@@ -138,7 +141,7 @@ if TEST_NOW:
     pprint(len(offers_buyer))
 
 # ----- fetch_liquidations_rmm_v3 --------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_fetchers import fetch_liquidations_rmm_v3
 if TEST_NOW:
@@ -152,7 +155,7 @@ if TEST_NOW:
 
 
 # ------ normalize_realt_purchases--------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_realt_purchases
@@ -165,7 +168,7 @@ if TEST_NOW:
 
 
 # ------ normalize_detokenisation--------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_detokenisation
@@ -180,7 +183,7 @@ if TEST_NOW:
 
 
 # ------ normalize_internal_transfer--------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.model import RealtokenEventHistory
 from core.realtoken_event_history.event_normalizers import normalize_internal_transfer
@@ -194,7 +197,7 @@ if TEST_NOW:
 
 
 # ------ normalize_yam_offers--------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_normalizers import normalize_yam_offers
 import json
@@ -210,7 +213,7 @@ if TEST_NOW:
     pprint(realtoken_event_history.events_for_tx('0x7b8b3c020c63e421f41b45dd92e7a2d084ce036155389b4f75e4b87af3280f06'))
 
 # ------ normalize_liquidations_rmm_v3--------
-TEST_NOW = True
+TEST_NOW = False
 
 from core.realtoken_event_history.event_normalizers import normalize_liquidations_rmm_v3
 if TEST_NOW:
