@@ -24,7 +24,7 @@ from core.realtoken_event_history.event_normalizers import (
     normalize_realt_purchases,
     normalize_yam_offers
 )
-from core.realtoken_event_history.model import RealtokenEventHistory
+from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
 from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_aggregated
 from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
 from core.performance.calculator import PerformanceCalculator
@@ -138,7 +138,8 @@ def realtokens_performance():
     )
     balance_snapshots_series = BalanceSnapshotSeries([snapshot_now])
 
-    
+    # ---- all possible event types (from enum) ----
+    all_event_types = [event_type.value for event_type in RealtokenEventType]
 
     ##### BUILDING THE ROI CALCULATOR ######
     realtokens_performance = PerformanceCalculator(realtoken_event_history, balance_snapshots_series)
@@ -162,6 +163,7 @@ def realtokens_performance():
     
     response = {
         "wallets": wallets,
+        "event_types": all_event_types,
         "events": realtoken_event_history.as_dict_serialized(),
         
         "performance": {
