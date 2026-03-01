@@ -260,38 +260,40 @@ class PerformanceCalculator:
 
         def _compute_missing_qty_for_consolidation(token_address: str) -> Decimal:
             """
-            Compute how many tokens must be added as a virtual IN lot so that:
-                sum(IN) - sum(OUT) == current_balance
+            Return the minimal synthetic IN quantity to:
+              1) prevent running balance from going below 0 at any point
+              2) ensure final tracked quantity is not below current balance
             """
-            tracked_qty = Decimal("0")
+            running = Decimal("0")
+            min_running = Decimal("0")
         
-            for ev in events:
-                # Transfers do not affect WAC position here (no price, no realized event).
+            for ev in events:  # events sorted chronologically
                 if ev.event_type == RealtokenEventType.TRANSFER:
                     continue
         
+                amt = Decimal(ev.amount)
+        
                 if ev.event_type in in_types:
-                    tracked_qty += Decimal(ev.amount)
-                    continue
+                    running += amt
+                elif ev.event_type in out_types:
+                    running -= amt
         
-                if ev.event_type in out_types:
-                    tracked_qty -= Decimal(ev.amount)
-                    continue
+                if running < min_running:
+                    min_running = running
         
-            # Current on-chain / snapshot balance for this token
+            floor_qty = -min_running if min_running < 0 else Decimal("0")
+        
             current_balance = self._balance_snapshots_series.latest().balances_by_token.get(
                 token_address.lower(),
                 Decimal("0"),
             )
         
-            # If the history explains less than the current balance, we need a virtual IN lot.
-            missing_qty = current_balance - tracked_qty
+            tracked_final = running
+            final_gap = current_balance - tracked_final
+            if final_gap < 0:
+                final_gap = Decimal("0")
         
-            # Do not return negative missing qty: if tracked > balance, we don't "invent" OUT here.
-            if missing_qty <= EPS:
-                return Decimal("0")
-        
-            return missing_qty
+            return max(floor_qty, final_gap)
 
 
         # ---- 4) Consolidate the position once, up-front (no mutation of the real event history) ----
