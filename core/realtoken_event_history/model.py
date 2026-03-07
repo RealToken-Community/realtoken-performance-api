@@ -29,13 +29,13 @@ _TX_HASH_REGEX = re.compile(r"^0x[a-fA-F0-9]{64}$")
 class RealtokenEventType(str, Enum):
     BUY_FROM_REALT = "buy from realt"
     BUY_YAM_V1 = "buy yam"
+    TRANSFER = "internal transfer"
+    LIQUIDATED = "liquidated"
+    LIQUIDATION = "liquidation"
     SELL_YAM_V1 = "sell yam"
+    DETOKENISATION = "detokenisation"
     BUY_SWAPCAT = "buy swapcat"
     SELL_SWAPCAT = "sell swapcat"
-    TRANSFER = "internal transfer"
-    LIQUIDATION = "liquidation"
-    LIQUIDATED = "liquidated"
-    DETOKENISATION = "detokenisation"
 
 # =========================
 # Event (immutable)
