@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Iterable, Mapping, Optional
+from typing import Dict, List, Iterable, Mapping, Optional
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,13 @@ class BalanceSnapshot:
     """
     as_of: datetime
     balances_by_token: Mapping[str, Decimal]
+
+    @property
+    def tokens(self) -> List[str]:
+        """
+        Return the list of token addresses present in this snapshot.
+        """
+        return list(self.balances_by_token.keys())
 
 
 class BalanceSnapshotSeries:
