@@ -6,6 +6,7 @@ import time
 import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
+from eth_utils import to_checksum_address
 from job.utilities import load_json
 from core.services.get_all_user_linked_addresses import get_all_user_linked_addresses
 from core.realtoken_event_history.event_fetchers import (
@@ -162,7 +163,7 @@ def realtokens_performance():
     
     
     response = {
-        "wallets": wallets,
+        "wallets": [to_checksum_address(wallet) for wallet in wallets],
         "event_types": all_event_types,
         "events": realtoken_event_history.as_dict_serialized(),
         
@@ -180,7 +181,7 @@ def realtokens_performance():
     end = time.perf_counter()
     duration = end - start
     logger.info(
-        f"ROI calculator requested for wallet {wallet}. Request completed in {duration:.3f} seconds."
+        f"Realtoken performance requested for wallet {wallet}. Request completed in {duration:.3f} seconds."
     )
     
     return jsonify(response)
