@@ -199,10 +199,10 @@ class RealizedPnLIndicator:
     
     def to_dict(self, places: int = 4) -> Dict[str, Any]:
         q = Decimal("1").scaleb(-places)
-
-        def r(x: Optional[Decimal]) -> Optional[Decimal]:
-            return x.quantize(q) if x is not None else None
-
+    
+        def r(x: Optional[Decimal]) -> Optional[float]:
+            return float(x.quantize(q)) if x is not None else None
+    
         return {
             "annualized_return_pct": r(self.annualized_return_pct),
             "return_pct": r(self.return_pct),
@@ -251,10 +251,10 @@ class RealizedPnLIndicator:
 
 class UnrealizedPnLIndicator:
     """
-    Final unrealized performance indicator for an open position.
+    Final unrealized performance indicator for an open position (for a specific token).
 
     This object represents an estimated business result:
-    - it is created from the current on-chain quantity and a spot price
+    - it is created from the current on-chain quantity and a current spot price
     - the cost basis is estimated from a WAC (average acquisition cost per token)
     - all aggregate figures are computed once at construction time
     - only the return and the annualized return are exposed as derived metrics
@@ -262,17 +262,17 @@ class UnrealizedPnLIndicator:
 
     def __init__(
         self,
-        current_price: Decimal,
+        current_unit_price: Decimal,
         current_quantity: Decimal,
         avg_cost_per_token: Decimal,
         avg_holding_days: Optional[float],
     ) -> None:
-        self.current_price: Decimal = current_price
+        self.current_unit_price: Decimal = current_unit_price
         self.current_quantity: Decimal = current_quantity
         self.avg_cost_per_token: Decimal = avg_cost_per_token
 
         # Aggregated values (materialized once)
-        self.current_value: Decimal = current_price * current_quantity
+        self.current_value: Decimal = current_unit_price * current_quantity
         self.cost_basis: Decimal = avg_cost_per_token * current_quantity
         self.unrealized_pnl: Decimal = self.current_value - self.cost_basis
 
@@ -321,11 +321,11 @@ class UnrealizedPnLIndicator:
         avg_cost_per_token = (total_cost_basis / total_quantity) if total_quantity > 0 else Decimal("0")
 
         # "Portfolio spot price" is also a placeholder to satisfy the constructor contract.
-        # It is chosen so that current_price * quantity == total_current_value.
-        current_price = (total_current_value / total_quantity) if total_quantity > 0 else Decimal("0")
+        # It is chosen so that current_unit_price * quantity == total_current_value.
+        current_unit_price = (total_current_value / total_quantity) if total_quantity > 0 else Decimal("0")
 
         return cls(
-            current_price=current_price,
+            current_unit_price=current_unit_price,
             current_quantity=total_quantity,
             avg_cost_per_token=avg_cost_per_token,
             avg_holding_days=avg_holding_days,
@@ -363,10 +363,10 @@ class UnrealizedPnLIndicator:
 
     def to_dict(self, places: int = 4) -> Dict[str, Any]:
         q = Decimal("1").scaleb(-places)
-
-        def r(x: Optional[Decimal]) -> Optional[Decimal]:
-            return x.quantize(q) if x is not None else None
-
+    
+        def r(x: Optional[Decimal]) -> Optional[float]:
+            return float(x.quantize(q)) if x is not None else None
+    
         return {
             "annualized_return_pct": r(self.annualized_return_pct),
             "return_pct": r(self.return_pct),
@@ -374,15 +374,15 @@ class UnrealizedPnLIndicator:
             "cost_basis": r(self.cost_basis),
             "current_value": r(self.current_value),
             "avg_holding_days": round(self.avg_holding_days, 2) if self.avg_holding_days is not None else None,
-            "quantity": r(self.current_quantity),
-            "current_price": r(self.current_price),
+            "current_quantity": r(self.current_quantity),
+            "current_unit_price": r(self.current_unit_price),
             "avg_cost_per_token": r(self.avg_cost_per_token),
         }
 
     def __repr__(self) -> str:
         return (
             f"UnrealizedPnLIndicator("
-            f"current_price={self.current_price}, "
+            f"current_unit_price={self.current_unit_price}, "
             f"current_quantity={self.current_quantity}, "
             f"avg_cost_per_token={self.avg_cost_per_token}, "
             f"current_value={self.current_value}, "
@@ -413,7 +413,7 @@ class UnrealizedPnLIndicator:
             f"Cost basis:          {fmt_money(self.cost_basis)}\n"
             f"Current value:       {fmt_money(self.current_value)}\n"
             f"Avg holding period:  {fmt_days(self.avg_holding_days)}\n"
-            f"Quantity:            {self.current_quantity:.2f}\n"
-            f"Spot price:          {fmt_money(self.current_price)}\n"
+            f"Current quantity:    {self.current_quantity:.2f}\n"
+            f"Current unit price:  {fmt_money(self.current_unit_price)}\n"
             f"Avg cost / token:    {fmt_money(self.avg_cost_per_token)}"
         )
