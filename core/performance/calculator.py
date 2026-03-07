@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import List, Dict, Optional, Tuple
 from eth_utils import to_checksum_address
 
+from config.settings import EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE, RWA_HOLDINGS_ADDRESS
 from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
 from core.balance_snapshots.model import BalanceSnapshotSeries
 from core.performance.model import Realization, RealizedPnLIndicator, UnrealizedPnLIndicator
@@ -51,7 +52,13 @@ class PerformanceCalculator:
         unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
         
 
-        for token_address in self._history.tokens():
+        all_token_uuids = (
+            {t.strip().lower() for t in self._history.tokens()}
+            |
+            {t.strip().lower() for t in self._balance_snapshots_series.latest().tokens}
+        )
+
+        for token_address in all_token_uuids:
             token_address = to_checksum_address(token_address)
 
             # Build realizations, WAC price and average holding days for every token present in the history
@@ -65,21 +72,26 @@ class PerformanceCalculator:
             current_quantity = self._balance_snapshots_series.latest().balances_by_token.get(token_address.lower(), Decimal("0"))
             unrealized_pnl_by_token[token_address] = UnrealizedPnLIndicator(current_price, current_quantity, final_weighted_avg_cost, final_avg_holding_days)
 
-
         self._realizations_by_token = realizations_by_token
         self.realized_pnl_by_token = realized_pnl_by_token
         self.unrealized_pnl_by_token = unrealized_pnl_by_token
 
         # Build the global Realized PnL (we take all the realizations of every tokens)
         all_realizations = []
-        for realizations in realizations_by_token.values():
+        for token_address, realizations in realizations_by_token.items():
+            if EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
+                continue
             for realization in realizations:
                 all_realizations.append(realization)
         self.global_realized_pnl = RealizedPnLIndicator(all_realizations)
 
         # Build the global Unrealized PnL (we take the unrealized indicator of every tokens)
-        token_indicators = unrealized_pnl_by_token.values()
-        self.global_unrealized_pnl = UnrealizedPnLIndicator.aggregate(token_indicators)
+        all_token_indicators = []
+        for token_address, token_indicators in unrealized_pnl_by_token.items():
+            if EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
+                continue
+            all_token_indicators.append(token_indicators)
+        self.global_unrealized_pnl = UnrealizedPnLIndicator.aggregate(all_token_indicators)
 
 
     def _build_realizations_and_open_wac_state_for_token(self, token_address: str) -> Tuple[List["Realization"], Decimal, float]:
