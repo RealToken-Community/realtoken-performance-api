@@ -8,6 +8,7 @@ services:
 
     volumes:
       - realtokens-performance-logs:/app/logs
+      - rent-files-parquet:/app/data/rent_files_parquet
 
     ports:
       - "${API_PORT_INTERNAL}:${API_PORT_INTERNAL}"
@@ -18,6 +19,7 @@ services:
 
 volumes:
   realtokens-performance-logs:
+  rent-files-parquet:
 
 networks:
   yam-events-db-shared-network:

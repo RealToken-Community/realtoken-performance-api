@@ -7,3 +7,10 @@ logs/
 .git/
 .gitignore
 .env
+*csv
+*parquet
+data/rent_files_parquet/list_rent_files_collected.json
+data/realtokens_data.json
+data/realtokens_history.json
+data/rent_files_parquet/parquet_by_year/*
+!data/rent_files_parquet/parquet_by_year/.gitkeep

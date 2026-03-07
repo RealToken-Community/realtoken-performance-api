@@ -16,6 +16,12 @@ PAYMENT_TOKEN_FOR_YAM = ["usdc", "wxdai", "armmv3usdc", "armmv3wxdai", "reg", "r
 
 LIQUIDATION_BONUS = 1.1
 
+# Google drive rent files
+RENT_FILES_FOLDER_ID = "1hmlw04fNhj-1nN0S493fheLzcZOLai_G"
+
+EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE = True
+RWA_HOLDINGS_ADDRESS = "0x0675e8f4a52ea6c845cb6427af03616a2af42170"
+
 TRUSTED_INTERMEDIARY_FOR_USER_ID = '0x296033cb983747b68911244EC1A3f01d7708851b' # trusted_intermediary needed to resolve all addresses of user related to its KYC
 
 MULTICALLV3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11"

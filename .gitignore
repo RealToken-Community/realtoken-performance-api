@@ -55,6 +55,7 @@ Thumbs.db
 .env
 .env.*
 *.env
+google-drive-service-account.json
 
 
 # =========================
@@ -63,7 +64,18 @@ Thumbs.db
 *.tmp
 *.bak
 *.orig
-data_tmp/*
+
+# =========================
+# rent files
+# =========================
+data/rent_files_parquet/list_rent_files_collected.json
+data/realtokens_data.json
+data/realtokens_history.json
+data/rent_files_parquet/parquet_by_year/*
+!data/rent_files_parquet/parquet_by_year/.gitkeep
+data/rent_files_csv/errors/*
+!data/rent_files_csv/errors/.gitkeep
+data/rent_files_csv/*.csv
 
 
 # =========================
