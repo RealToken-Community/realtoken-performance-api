@@ -199,4 +199,5 @@ def test_postgres_connection(POSTGRES_DATA) -> bool:
     except Exception as e:
         send_telegram_alert(f"roi calculator api: Postgres DB connection failed")
         logger.exception(f"Postgres connection failed")
+        time.sleep(120)
         return False
