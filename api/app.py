@@ -46,7 +46,7 @@ def _register_error_handlers(app: Flask) -> None:
     @app.errorhandler(500)
     def internal_error(e: Exception):  # type: ignore[override]
         current_app.logger.exception("Unhandled error")
-        send_telegram_alert(f"roi calculator api : Unhandled error, please check the logs.\n{type(e).__name__}: {e}")
+        send_telegram_alert(f"realtoken performance api : Unhandled error, please check the logs.\n{type(e).__name__}: {e}")
         return jsonify({"error": "internal_server_error"}), 500
 
 
@@ -60,7 +60,7 @@ def create_app() -> Flask:
     # Get a logger for this module
     logger = logging.getLogger(__name__)
     logger.info("Application started")
-    send_telegram_alert("roi calculator api: Application has started")
+    send_telegram_alert("realtoken performance api: Application has started")
 
     app = Flask(__name__)
 
@@ -104,6 +104,6 @@ def create_app() -> Flask:
 
     @app.get("/")
     def root():
-        return jsonify({"name": "roi-calculator-api", "status": "ok"})
+        return jsonify({"name": "realtoken-performance-api", "status": "ok"})
 
     return app
