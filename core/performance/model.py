@@ -5,6 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Tuple, Iterable, Any, Dict
 
+from core.income.model import WeeklyDistributionSeries
+
 EventId = Tuple[str, int]  # (transaction_hash, log_index)
 
 
@@ -416,4 +418,178 @@ class UnrealizedPnLIndicator:
             f"Current quantity:    {self.current_quantity:.2f}\n"
             f"Current unit price:  {fmt_money(self.current_unit_price)}\n"
             f"Avg cost / token:    {fmt_money(self.avg_cost_per_token)}"
+        )
+    
+
+class DistributedIncomeIndicator:
+    """
+    Distributed income indicator built from a WeeklyDistributionSeries.
+
+    Scope:
+    - token is None  -> aggregated indicator across all tokens
+    - token is set   -> indicator for one specific token only
+
+    Aggregate figures are computed once at construction time.
+    annualized_return is kept as None for now.
+    """
+
+    def __init__(
+        self,
+        distribution_series: WeeklyDistributionSeries,
+        token: Optional[str] = None,
+    ) -> None:
+        self.token: Optional[str] = token.strip().lower() if token is not None else None
+
+        if self.token is None:
+            total = distribution_series.total_revenue
+        else:
+            total = distribution_series.total_revenue_for_token(self.token)
+
+        self.total_revenues_distributed: Decimal = Decimal(str(total))
+        self.annualized_return: Optional[Decimal] = None # to do
+
+    @property
+    def is_global(self) -> bool:
+        return self.token is None
+
+    def to_dict(self, places: int = 4) -> Dict[str, Any]:
+        q = Decimal("1").scaleb(-places)
+
+        def r(x: Optional[Decimal]) -> Optional[float]:
+            return float(x.quantize(q)) if x is not None else None
+
+        return {
+            "total_revenues_distributed": r(self.total_revenues_distributed),
+            "annualized_return_pct": r(self.annualized_return),
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"DistributedIncomeIndicator("
+            f"token={self.token!r}, "
+            f"total_revenues_distributed={self.total_revenues_distributed}, "
+            f"annualized_return={self.annualized_return}"
+            f")"
+        )
+
+    def __str__(self) -> str:
+        def fmt_money(x: Decimal) -> str:
+            return f"{x:,.2f}"
+
+        def fmt_pct(x: Optional[Decimal]) -> str:
+            return f"{x:.2f}%" if x is not None else "N/A"
+
+        scope_label = "All tokens" if self.is_global else f"Token {self.token}"
+
+        return (
+            "--------------------------\n"
+            "Distributed Income Summary\n"
+            "--------------------------\n"
+            f"Scope:                      {scope_label}\n"
+            f"Total revenues distributed: {fmt_money(self.total_revenues_distributed)}\n"
+            f"Annualized return:          {fmt_pct(self.annualized_return)}"
+        )
+    
+
+
+class OverallPerformanceIndicator:
+    """
+    Final overall performance indicator built from realized gain, unrealized gain,
+    distributed income, and total invested cost basis.
+
+    This object represents a finalized aggregate result:
+    - it combines realized gain, unrealized gain, and distributed income
+    - all aggregate figures are computed once at construction time
+    - ROI is exposed as a derived metric
+    - IRR is passed in as-is
+    """
+
+    def __init__(
+        self,
+        realized_gain: Decimal,
+        unrealized_gain: Decimal,
+        income_distributed: Decimal,
+        total_cost_basis_realized: Decimal,
+        total_cost_basis_unrealized: Decimal,
+        irr: Optional[Decimal],
+    ) -> None:
+        self.realized_gain: Decimal = realized_gain
+        self.unrealized_gain: Decimal = unrealized_gain
+        self.income_distributed: Decimal = income_distributed
+
+        self.total_cost_basis_realized: Decimal = total_cost_basis_realized
+        self.total_cost_basis_unrealized: Decimal = total_cost_basis_unrealized
+
+        self.total_return: Decimal = (
+            self.realized_gain
+            + self.unrealized_gain
+            + self.income_distributed
+        )
+
+        self.irr: Optional[Decimal] = irr
+
+    @property
+    def total_cost_basis(self) -> Decimal:
+        return self.total_cost_basis_realized + self.total_cost_basis_unrealized
+
+    @property
+    def roi(self) -> Optional[Decimal]:
+        """
+        Overall ROI (%) = total_return / total_cost_basis * 100
+        """
+        if self.total_cost_basis == 0:
+            return None
+        return (self.total_return / self.total_cost_basis) * Decimal("100")
+
+    def to_dict(self, places: int = 4) -> Dict[str, Any]:
+        q = Decimal("1").scaleb(-places)
+
+        def r(x: Optional[Decimal]) -> Optional[float]:
+            return float(x.quantize(q)) if x is not None else None
+
+        return {
+            "realized_gain": r(self.realized_gain),
+            "unrealized_gain": r(self.unrealized_gain),
+            "income_distributed": r(self.income_distributed),
+            "total_return": r(self.total_return),
+            "total_cost_basis": r(self.total_cost_basis),
+            "roi_pct": r(self.roi),
+            "irr_pct": r(self.irr),
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"OverallPerformanceIndicator("
+            f"realized_gain={self.realized_gain}, "
+            f"unrealized_gain={self.unrealized_gain}, "
+            f"income_distributed={self.income_distributed}, "
+            f"total_return={self.total_return}, "
+            f"total_cost_basis_realized={self.total_cost_basis_realized}, "
+            f"total_cost_basis_unrealized={self.total_cost_basis_unrealized}, "
+            f"total_cost_basis={self.total_cost_basis}, "
+            f"roi={self.roi}, "
+            f"irr={self.irr}"
+            f")"
+        )
+
+    def __str__(self) -> str:
+        def fmt_money(x: Decimal) -> str:
+            return f"{x:,.2f}"
+
+        def fmt_pct(x: Optional[Decimal]) -> str:
+            return f"{x:.2f}%" if x is not None else "N/A"
+
+        return (
+            "---------------------------\n"
+            "Overall Performance Summary\n"
+            "---------------------------\n"
+            f"Realized gain:              {fmt_money(self.realized_gain)}\n"
+            f"Unrealized gain:            {fmt_money(self.unrealized_gain)}\n"
+            f"Income distributed:         {fmt_money(self.income_distributed)}\n"
+            f"Total return:               {fmt_money(self.total_return)}\n"
+            f"Realized cost basis:        {fmt_money(self.total_cost_basis_realized)}\n"
+            f"Unrealized cost basis:      {fmt_money(self.total_cost_basis_unrealized)}\n"
+            f"Total cost basis:           {fmt_money(self.total_cost_basis)}\n"
+            f"ROI:                        {fmt_pct(self.roi)}\n"
+            f"IRR:                        {fmt_pct(self.irr)}"
         )

@@ -8,9 +8,16 @@ from eth_utils import to_checksum_address
 from config.settings import EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE, RWA_HOLDINGS_ADDRESS
 from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
 from core.balance_snapshots.model import BalanceSnapshotSeries
-from core.performance.model import Realization, RealizedPnLIndicator, UnrealizedPnLIndicator
+from core.income.model import WeeklyDistributionSeries
 from core.services.utilities import get_token_issuance_timestamp, get_token_price_at_timestamp
 from job.utilities import load_json
+from core.performance.model import (
+    Realization,
+    RealizedPnLIndicator,
+    UnrealizedPnLIndicator,
+    DistributedIncomeIndicator,
+    OverallPerformanceIndicator
+)
 
 
 class PerformanceCalculator:
@@ -21,26 +28,35 @@ class PerformanceCalculator:
       using the Weighted Average Cost (WAC) method
     """
 
-    def __init__(self, history: RealtokenEventHistory, balance_snapshots_series: BalanceSnapshotSeries) -> None:
+    def __init__(self, history: RealtokenEventHistory, balance_snapshots_series: BalanceSnapshotSeries, weekly_distribution_series: WeeklyDistributionSeries) -> None:
         
-        self.realtoken_history = load_json("data_tmp/realtokens_history.json")
+        self.realtoken_history = load_json("data/realtokens_history.json")
         
         self._history = history
         self._balance_snapshots_series = balance_snapshots_series
+        self._weekly_distribution_series = weekly_distribution_series
 
         self._realizations_by_token: Dict[str, List[Realization]] = {}
 
         # Realized performance
         self.realized_pnl_by_token: Dict[str, RealizedPnLIndicator] = {}
-        self.global_realized_pnl: Optional[RealizedPnLIndicator] = None
+        self.realized_pnl_portfolio: Optional[RealizedPnLIndicator] = None
 
         # Unrealized performance
         self.unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
-        self.global_unrealized_pnl: Optional[UnrealizedPnLIndicator] = None
+        self.unrealized_pnl_portfolio: Optional[UnrealizedPnLIndicator] = None
+
+        # Distributed income
+        self.distributed_income_by_token: Dict[str, DistributedIncomeIndicator] = {}
+        self.distributed_income_portfolio: Optional[DistributedIncomeIndicator] = None
+
+        # Overall performance
+        self.overall_performance_by_token: Dict[str, OverallPerformanceIndicator] = {}
+        self.overall_performance_portfolio: Optional[OverallPerformanceIndicator] = None
 
         self._build_performance()
 
-    def _build_performance(self) -> Dict[str, List[Realization]]:
+    def _build_performance(self) -> None:
         """
         Build realizations for every token present in the history and store them on the instance.
 
@@ -50,8 +66,9 @@ class PerformanceCalculator:
         realizations_by_token: Dict[str, List[Realization]] = {}
         realized_pnl_by_token: Dict[str, RealizedPnLIndicator] = {}
         unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
+        distributed_income_by_token: Dict[str, DistributedIncomeIndicator] = {}
+        overall_performance_by_token: Dict[str, OverallPerformanceIndicator] = {}
         
-
         all_token_uuids = (
             {t.strip().lower() for t in self._history.tokens()}
             |
@@ -72,26 +89,65 @@ class PerformanceCalculator:
             current_quantity = self._balance_snapshots_series.latest().balances_by_token.get(token_address.lower(), Decimal("0"))
             unrealized_pnl_by_token[token_address] = UnrealizedPnLIndicator(current_price, current_quantity, final_weighted_avg_cost, final_avg_holding_days)
 
+            # Build a distributed income indicator for every token present in the history
+            distributed_income_by_token[token_address] = DistributedIncomeIndicator(self._weekly_distribution_series, token_address)
+
+            # Build a overall performance for every token present in the history
+            overall_performance_by_token[token_address] = OverallPerformanceIndicator(
+                realized_pnl_by_token[token_address].realized_pnl,
+                unrealized_pnl_by_token[token_address].unrealized_pnl,
+                distributed_income_by_token[token_address].total_revenues_distributed,
+                realized_pnl_by_token[token_address].total_cost_basis_out,
+                unrealized_pnl_by_token[token_address].cost_basis,
+                None
+            )
+
+
         self._realizations_by_token = realizations_by_token
         self.realized_pnl_by_token = realized_pnl_by_token
         self.unrealized_pnl_by_token = unrealized_pnl_by_token
+        self.distributed_income_by_token = distributed_income_by_token
+        self.overall_performance_by_token = overall_performance_by_token
 
-        # Build the global Realized PnL (we take all the realizations of every tokens)
+        # Build the portfolio Realized PnL (we take all the realizations of every tokens)
         all_realizations = []
         for token_address, realizations in realizations_by_token.items():
             if EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
                 continue
             for realization in realizations:
                 all_realizations.append(realization)
-        self.global_realized_pnl = RealizedPnLIndicator(all_realizations)
+        self.realized_pnl_portfolio = RealizedPnLIndicator(all_realizations)
 
-        # Build the global Unrealized PnL (we take the unrealized indicator of every tokens)
+        # Build the portfolio Unrealized PnL (we take the unrealized indicator of every tokens)
         all_token_indicators = []
         for token_address, token_indicators in unrealized_pnl_by_token.items():
             if EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
                 continue
             all_token_indicators.append(token_indicators)
-        self.global_unrealized_pnl = UnrealizedPnLIndicator.aggregate(all_token_indicators)
+        self.unrealized_pnl_portfolio = UnrealizedPnLIndicator.aggregate(all_token_indicators)
+
+        # Build the portfolio Distribued Income
+        self.distributed_income_portfolio = DistributedIncomeIndicator(self._weekly_distribution_series, None)
+
+        # Build teh portfolio overall performance
+        self.overall_performance_portfolio = OverallPerformanceIndicator(
+            self.realized_pnl_portfolio.realized_pnl,
+            self.unrealized_pnl_portfolio.unrealized_pnl,
+            self.distributed_income_portfolio.total_revenues_distributed,
+            self.realized_pnl_portfolio.total_cost_basis_out,
+            self.unrealized_pnl_portfolio.cost_basis,
+            None
+        )
+    
+    def _build_overall_performance(self) -> None:
+        """
+        Compute the overall performance by combining realized gains, unrealized gains,
+        and distributed income.
+        
+        The indicator is calculated both at the token level and at the aggregated
+        portfolio level, providing a global view of total performance.
+        """
+        pass
 
 
     def _build_realizations_and_open_wac_state_for_token(self, token_address: str) -> Tuple[List["Realization"], Decimal, float]:

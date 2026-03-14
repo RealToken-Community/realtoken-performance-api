@@ -29,6 +29,8 @@ from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenE
 from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_aggregated
 from core.balance_snapshots.model import BalanceSnapshot, BalanceSnapshotSeries
 from core.performance.calculator import PerformanceCalculator
+from core.income import load_weekly_distributions_from_parquet
+from core.income.model import WeeklyDistributionSeries
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +68,13 @@ def realtokens_performance():
 
     wallets = get_all_user_linked_addresses(wallet, THE_GRAPH_API_KEY, REALTOKEN_GNOSIS_SUBGRAPH_ID)
 
-    realtoken_data = load_json("data_tmp/realtokens_data.json")
-    realtoken_history = load_json("data_tmp/realtokens_history.json")
+    realtoken_data = load_json("data/realtokens_data.json")
+    realtoken_history = load_json("data/realtokens_history.json")
 
     now = datetime.now(timezone.utc)
 
     # Parallelize the network/IO work:
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         
         # --- RealToken transfers (The Graph) ---
         user_transfers_task = ex.submit(
@@ -99,6 +101,12 @@ def realtokens_performance():
             wallets,
         )
 
+        # --- Load income distributions ---
+        income_distributions_task = ex.submit(
+            load_weekly_distributions_from_parquet,
+            wallets,
+        )
+
         # --- fetch yam v1 events (Postgres DB) ---
         yam_v1_events_task = ex.submit(
             fetch_yam_v1_events,
@@ -113,6 +121,7 @@ def realtokens_performance():
         detokenisations_events = extract_detokenisations(user_transfers["data"]["outTransfers"], realtoken_history)
         rmmv3_liquidations = rmmv3_liquidations_task.result()
         current_balances = current_balances_task.result()
+        income_distributions = income_distributions_task.result()
         offers_seller, offers_buyer = yam_v1_events_task.result()
 
 
@@ -139,11 +148,15 @@ def realtokens_performance():
     )
     balance_snapshots_series = BalanceSnapshotSeries([snapshot_now])
 
+    # ----- income distribution -----
+    income_distribution_series = WeeklyDistributionSeries(income_distributions)
+
+
     # ---- all possible event types (from enum) ----
     all_event_types = [event_type.value for event_type in RealtokenEventType]
 
     ##### BUILDING THE ROI CALCULATOR ######
-    realtokens_performance = PerformanceCalculator(realtoken_event_history, balance_snapshots_series)
+    realtokens_performance = PerformanceCalculator(realtoken_event_history, balance_snapshots_series, income_distribution_series)
 
     # Build performance by_token
     all_token_uuids = (
@@ -154,11 +167,14 @@ def realtokens_performance():
     for uuid in sorted(all_token_uuids):
         realized_indicator = realtokens_performance.realized_pnl_by_token.get(uuid)
         unrealized_indicator = realtokens_performance.unrealized_pnl_by_token.get(uuid)
+        income_distribution = realtokens_performance.distributed_income_by_token.get(uuid)
+        overall_performance = realtokens_performance.overall_performance_by_token.get(uuid)
     
         by_token[uuid] = {
             "realized": realized_indicator.to_dict() if realized_indicator else None,
             "unrealized": unrealized_indicator.to_dict() if unrealized_indicator else None,
-            "roi": None,
+            "distributed_income": income_distribution.to_dict() if income_distribution else None,
+            "overall_performance": overall_performance.to_dict() if overall_performance else None,
         }
     
     
@@ -168,10 +184,11 @@ def realtokens_performance():
         "events": realtoken_event_history.as_dict_serialized(),
         
         "performance": {
-            "global": {
-                "realized": realtokens_performance.global_realized_pnl.to_dict(),
-                "unrealized": realtokens_performance.global_unrealized_pnl.to_dict(),
-                "roi": None,
+            "portfolio": {
+                "realized": realtokens_performance.realized_pnl_portfolio.to_dict(),
+                "unrealized": realtokens_performance.unrealized_pnl_portfolio.to_dict(),
+                "distributed_income" : realtokens_performance.distributed_income_portfolio.to_dict(),
+                "overall_performance": realtokens_performance.overall_performance_portfolio.to_dict(),
             },
             "by_token": by_token,
         },
