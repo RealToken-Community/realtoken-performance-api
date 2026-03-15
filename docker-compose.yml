@@ -15,12 +15,12 @@ services:
 
     restart: unless-stopped
     networks:
-      - yam-events-db-shared-network
+      - yam-graph
 
 volumes:
   realtokens-performance-logs:
   rent-files-parquet:
 
 networks:
-  yam-events-db-shared-network:
+  yam-graph:
     external: true
