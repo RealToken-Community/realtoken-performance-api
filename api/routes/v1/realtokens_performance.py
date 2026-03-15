@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request, current_app
 
+
+
 import time
 import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from eth_utils import to_checksum_address
+from diskcache import Cache
+from config.settings import CACHE_ENABLED, CACHE_TTL_SECONDS
 from job.utilities import load_json
 from core.services.send_telegram_alert import send_telegram_alert
 from core.services.get_all_user_linked_addresses import get_all_user_linked_addresses
@@ -36,12 +40,17 @@ from core.income.model import WeeklyDistributionSeries
 logger = logging.getLogger(__name__)
 
 realtokens_performance_bp = Blueprint("realtokens_performance", __name__)
+cache = Cache("data/cache/realtokens_performance")
 
 
 def _validate_wallet(wallet: str) -> bool:
     # Minimal EVM address validation
     wallet = wallet.strip()
     return wallet.startswith("0x") and len(wallet) == 42
+
+def _build_cache_key_from_wallets(wallets: list[str]) -> str:
+    normalized = sorted(wallet.lower() for wallet in wallets)
+    return "realtokens-performance:" + ",".join(normalized)
 
 
 @realtokens_performance_bp.get("/realtokens-performance")
@@ -54,6 +63,7 @@ def realtokens_performance():
     success = False
 
     wallet = (request.args.get("wallet") or "").strip()
+    no_cache = request.args.get("no_cache", "false").lower() == "true"
 
     try:
 
@@ -67,10 +77,25 @@ def realtokens_performance():
         THE_GRAPH_API_KEY = current_app.config['THE_GRAPH_API_KEY']
         REALTOKEN_GNOSIS_SUBGRAPH_ID = current_app.config['REALTOKEN_GNOSIS_SUBGRAPH_ID']
         RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID = current_app.config['RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID']
-        POSTGRES_DATA = current_app.config['POSTGRES_DATA']
         BLOCKCHAIN_CONTRACTS = current_app.config['BLOCKCHAIN_CONTRACTS']
-    
+
+        
         wallets = get_all_user_linked_addresses(wallet, THE_GRAPH_API_KEY, REALTOKEN_GNOSIS_SUBGRAPH_ID)
+
+        
+        if CACHE_ENABLED and not no_cache:
+            cache_key = _build_cache_key_from_wallets(wallets)
+            cached_response = cache.get(cache_key)
+    
+            if cached_response is not None:
+                logger.info(
+                    "Cache hit for key %s and wallets=%s",
+                    cache_key,
+                    wallets,
+                )
+                success = True
+                return jsonify(cached_response)
+            
     
         realtoken_data = load_json("data/realtokens_data.json")
         realtoken_history = load_json("data/realtokens_history.json")
@@ -197,7 +222,17 @@ def realtokens_performance():
                 "by_token": by_token,
             },
         }
+        
+        if CACHE_ENABLED:
+            cache_key = _build_cache_key_from_wallets(response["wallets"])
+            cache.set(cache_key, response, expire=CACHE_TTL_SECONDS)
+            logger.info(
+                "Performance response cached under key %s",
+                cache_key,
+            )
+        
         success = True
+        
         return jsonify(response)
 
     except BaseException as e:
@@ -214,9 +249,12 @@ def realtokens_performance():
         # Measure request duration to log slow requests and simplify debugging
         duration = time.perf_counter() - start
         status = "completed successfully" if success else "failed or aborted"
+        status_cache = " (no_cache=true)" if no_cache else ""
+
         logger.info(
-            "Realtoken performance request for wallet %s %s in %.3f seconds.",
+            "Realtoken performance request for wallet %s %s in %.3f seconds%s.",
             wallet,
             status,
             duration,
+            status_cache,
         )

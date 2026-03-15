@@ -18,6 +18,9 @@ LIQUIDATION_BONUS = 1.1
 
 API_URL_PREFIX_V1="/api/v1"
 
+CACHE_ENABLED = True
+CACHE_TTL_SECONDS = 18 * 60 * 60
+
 # Google drive rent files
 RENT_FILES_FOLDER_ID = "1hmlw04fNhj-1nN0S493fheLzcZOLai_G"
 
