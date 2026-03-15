@@ -7,6 +7,7 @@ from flask import Flask, jsonify, current_app
 from flask_cors import CORS
 
 from config.logging_config_api import setup_logging
+from config.settings import API_URL_PREFIX_V1
 from core.services.send_telegram_alert import send_telegram_alert
 from core.services.utilities import test_postgres_connection
 from api.routes.v1 import v1_bp
@@ -16,7 +17,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", '.*')
-API_URL_PREFIX_V1 = os.getenv("API_URL_PREFIX_V1")
 API_PORT = int(os.getenv('API_PORT_INTERNAL', '5001'))
 
 THE_GRAPH_API_KEY = os.getenv("THE_GRAPH_API_KEY")
@@ -79,8 +79,8 @@ def create_app() -> Flask:
     app.config['REALTOKEN_GNOSIS_SUBGRAPH_ID'] = REALTOKEN_GNOSIS_SUBGRAPH_ID
     app.config['RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID'] = RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID
 
-    # Maximum size of paylaod (16 KB)
-    app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
+    # Maximum size of paylaod (8 KB)
+    app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
     
     try:
         with open('Ressources/blockchain_contracts.json', 'r') as contracts_file:

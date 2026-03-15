@@ -16,6 +16,8 @@ PAYMENT_TOKEN_FOR_YAM = ["usdc", "wxdai", "armmv3usdc", "armmv3wxdai", "reg", "r
 
 LIQUIDATION_BONUS = 1.1
 
+API_URL_PREFIX_V1="/api/v1"
+
 # Google drive rent files
 RENT_FILES_FOLDER_ID = "1hmlw04fNhj-1nN0S493fheLzcZOLai_G"
 
