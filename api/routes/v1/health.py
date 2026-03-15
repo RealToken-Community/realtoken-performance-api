@@ -15,12 +15,10 @@ def health():
     """
 
     now_utc = datetime.now(timezone.utc)
-    now_local = now_utc.astimezone()
 
     return jsonify(
         {
             "status": "ok",
             "utc_datetime": now_utc.isoformat(),
-            "local_datetime": now_local.isoformat(),
         }
     )
