@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import List, Dict, Optional, Tuple
 from eth_utils import to_checksum_address
 
-from config.settings import EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE, RWA_HOLDINGS_ADDRESS
+from config.settings import EXCLUDE_RWA_HOLDINGS_FROM_OVERALL_PERFORMANCE, RWA_HOLDINGS_ADDRESS
 from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
 from core.balance_snapshots.model import BalanceSnapshotSeries
 from core.income.model import WeeklyDistributionSeries
@@ -16,17 +16,13 @@ from core.performance.model import (
     RealizedPnLIndicator,
     UnrealizedPnLIndicator,
     DistributedIncomeIndicator,
-    OverallPerformanceIndicator
+    OverallPerformanceIndicator,
+    IRRCashFlow,
+    IRRCashFlowSeries
 )
 
 
 class PerformanceCalculator:
-    """
-    Step 1:
-    - Initialized with a RealtokenEventHistory
-    - For a given token, converts its events into a list of Realization
-      using the Weighted Average Cost (WAC) method
-    """
 
     def __init__(self, history: RealtokenEventHistory, balance_snapshots_series: BalanceSnapshotSeries, weekly_distribution_series: WeeklyDistributionSeries) -> None:
         
@@ -37,10 +33,11 @@ class PerformanceCalculator:
         self._weekly_distribution_series = weekly_distribution_series
 
         self._realizations_by_token: Dict[str, List[Realization]] = {}
+        self._irr_cash_flows_by_token: Dict[str, List[IRRCashFlow]] = {}
 
         # Realized performance
         self.realized_pnl_by_token: Dict[str, RealizedPnLIndicator] = {}
-        self.realized_pnl_portfolio: Optional[RealizedPnLIndicator] = None
+        self.realized_pnl_portfolio: Optional[RealizedPnLIndicator] = None        
 
         # Unrealized performance
         self.unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
@@ -49,6 +46,10 @@ class PerformanceCalculator:
         # Distributed income
         self.distributed_income_by_token: Dict[str, DistributedIncomeIndicator] = {}
         self.distributed_income_portfolio: Optional[DistributedIncomeIndicator] = None
+
+        # IRR
+        self.irr_by_token: Dict[str, IRRCashFlowSeries] = {}
+        self.irr_portfolio: Optional[IRRCashFlowSeries] = None
 
         # Overall performance
         self.overall_performance_by_token: Dict[str, OverallPerformanceIndicator] = {}
@@ -65,6 +66,8 @@ class PerformanceCalculator:
         """
         realizations_by_token: Dict[str, List[Realization]] = {}
         realized_pnl_by_token: Dict[str, RealizedPnLIndicator] = {}
+        irr_cash_flows_by_token: Dict[str, List[IRRCashFlow]] = {}
+        irr_by_token: Dict[str, IRRCashFlowSeries] = {}
         unrealized_pnl_by_token: Dict[str, UnrealizedPnLIndicator] = {}
         distributed_income_by_token: Dict[str, DistributedIncomeIndicator] = {}
         overall_performance_by_token: Dict[str, OverallPerformanceIndicator] = {}
@@ -77,20 +80,39 @@ class PerformanceCalculator:
 
         for token_address in all_token_uuids:
             token_address = to_checksum_address(token_address)
+            now_utc = datetime.now(timezone.utc)
 
             # Build realizations, WAC price and average holding days for every token present in the history
-            realizations_by_token[token_address], final_weighted_avg_cost, final_avg_holding_days = self._build_realizations_and_open_wac_state_for_token(token_address)
+            realizations_by_token[token_address], final_weighted_avg_cost, final_avg_holding_days, irr_cash_flows_by_token[token_address] = self._build_realizations_and_open_wac_state_for_token(token_address)
 
             # Build a Realized PnL for every token present in the history
             realized_pnl_by_token[token_address] = RealizedPnLIndicator(realizations_by_token[token_address])
 
             # Build a Unrealized PnL for every token present in the history
-            current_price = Decimal(get_token_price_at_timestamp(self.realtoken_history, token_address, datetime.now(timezone.utc)))
+            current_price = Decimal(get_token_price_at_timestamp(self.realtoken_history, token_address, now_utc))
             current_quantity = self._balance_snapshots_series.latest().balances_by_token.get(token_address.lower(), Decimal("0"))
             unrealized_pnl_by_token[token_address] = UnrealizedPnLIndicator(current_price, current_quantity, final_weighted_avg_cost, final_avg_holding_days)
 
             # Build a distributed income indicator for every token present in the history
             distributed_income_by_token[token_address] = DistributedIncomeIndicator(self._weekly_distribution_series, token_address)
+
+            # Build irr for every token present in the history
+            for amount, date in self._weekly_distribution_series.cash_flow_amount_and_date_for_token(token_address):
+                if amount is None or amount == 0:
+                    continue
+                irr_cash_flows_by_token[token_address].append(
+                    IRRCashFlow(amount=amount, timestamp=date)
+                )
+            terminal_value = unrealized_pnl_by_token[token_address].current_value
+            if terminal_value != 0:
+                irr_cash_flows_by_token[token_address].append(
+                    IRRCashFlow(
+                        timestamp=now_utc,
+                        amount=terminal_value,
+                    )
+                )
+            irr_by_token[token_address] = IRRCashFlowSeries(irr_cash_flows_by_token[token_address])
+            
 
             # Build a overall performance for every token present in the history
             overall_performance_by_token[token_address] = OverallPerformanceIndicator(
@@ -99,7 +121,7 @@ class PerformanceCalculator:
                 distributed_income_by_token[token_address].total_revenues_distributed,
                 realized_pnl_by_token[token_address].total_cost_basis_out,
                 unrealized_pnl_by_token[token_address].cost_basis,
-                None
+                irr_by_token[token_address].irr
             )
 
 
@@ -107,12 +129,14 @@ class PerformanceCalculator:
         self.realized_pnl_by_token = realized_pnl_by_token
         self.unrealized_pnl_by_token = unrealized_pnl_by_token
         self.distributed_income_by_token = distributed_income_by_token
+        self._irr_cash_flows_by_token = irr_cash_flows_by_token
+        self.irr_by_token = irr_by_token
         self.overall_performance_by_token = overall_performance_by_token
 
         # Build the portfolio Realized PnL (we take all the realizations of every tokens)
         all_realizations = []
         for token_address, realizations in realizations_by_token.items():
-            if EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
+            if EXCLUDE_RWA_HOLDINGS_FROM_OVERALL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
                 continue
             for realization in realizations:
                 all_realizations.append(realization)
@@ -121,13 +145,22 @@ class PerformanceCalculator:
         # Build the portfolio Unrealized PnL (we take the unrealized indicator of every tokens)
         all_token_indicators = []
         for token_address, token_indicators in unrealized_pnl_by_token.items():
-            if EXCLUDE_RWA_HOLDINGS_FROM_GLOBAL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
+            if EXCLUDE_RWA_HOLDINGS_FROM_OVERALL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
                 continue
             all_token_indicators.append(token_indicators)
         self.unrealized_pnl_portfolio = UnrealizedPnLIndicator.aggregate(all_token_indicators)
 
-        # Build the portfolio Distribued Income
+        # Build the portfolio Distributed Income
         self.distributed_income_portfolio = DistributedIncomeIndicator(self._weekly_distribution_series, None)
+
+        # Build the portfolio IRR (we take all the irr_cash_flow of every tokens)
+        all_irr_cash_flows = []
+        for token_address, irr_cash_flows in irr_cash_flows_by_token.items():
+            if EXCLUDE_RWA_HOLDINGS_FROM_OVERALL_PERFORMANCE and token_address.lower() == RWA_HOLDINGS_ADDRESS.lower():
+                continue
+            for irr_cash_flow in irr_cash_flows:
+                all_irr_cash_flows.append(irr_cash_flow)
+        self.irr_portfolio = IRRCashFlowSeries(all_irr_cash_flows).irr
 
         # Build teh portfolio overall performance
         self.overall_performance_portfolio = OverallPerformanceIndicator(
@@ -136,21 +169,11 @@ class PerformanceCalculator:
             self.distributed_income_portfolio.total_revenues_distributed,
             self.realized_pnl_portfolio.total_cost_basis_out,
             self.unrealized_pnl_portfolio.cost_basis,
-            None
+            self.irr_portfolio
         )
-    
-    def _build_overall_performance(self) -> None:
-        """
-        Compute the overall performance by combining realized gains, unrealized gains,
-        and distributed income.
-        
-        The indicator is calculated both at the token level and at the aggregated
-        portfolio level, providing a global view of total performance.
-        """
-        pass
 
 
-    def _build_realizations_and_open_wac_state_for_token(self, token_address: str) -> Tuple[List["Realization"], Decimal, float]:
+    def _build_realizations_and_open_wac_state_for_token(self, token_address: str) -> Tuple[List["Realization"], Decimal, float, List[IRRCashFlow]]:
         """
         Convert all events for a token into Realization objects using WAC, and also return
         final open-position metrics (WAC and avg holding days) for unrealized computations.
@@ -181,6 +204,7 @@ class PerformanceCalculator:
           Returns 0 if the remaining quantity is 0.
         - final_avg_holding_days: Quantity-weighted average holding time (in days) of the remaining open pool,
           measured as of "now" (UTC). Returns 0 if the remaining quantity is 0.
+        - irr_cash_flows: List[IRRCashFlow] derived from token events and normalized for later IRR computation.
         
         Notes:
         - The final metrics describe the open position (what remains after all realized OUT events).
@@ -222,6 +246,7 @@ class PerformanceCalculator:
         acquisition_lots: List[Dict] = []
 
         realizations: List[Realization] = []
+        irr_cash_flows: List[IRRCashFlow] = []
 
         # Small epsilon to clean up tiny Decimal dust created by proportional reductions.
         # This prevents ending with 1E-27 quantities after repeated prorata reductions.
@@ -362,6 +387,19 @@ class PerformanceCalculator:
                 final_gap = Decimal("0")
         
             return max(floor_qty, final_gap)
+        
+        def _append_irr_cash_flow(timestamp: datetime, amount: Decimal) -> None:
+            if amount == 0:
+                return
+        
+            ts = timestamp.replace(tzinfo=timezone.utc) if timestamp.tzinfo is None else timestamp.astimezone(timezone.utc)
+        
+            irr_cash_flows.append(
+                IRRCashFlow(
+                    timestamp=ts,
+                    amount=amount,
+                )
+            )
 
 
         # ---- 4) Consolidate the position once, up-front (no mutation of the real event history) ----
@@ -369,17 +407,22 @@ class PerformanceCalculator:
 
         if missing_qty > EPS:
             # This synthetic lot exists only in this calculation to reconcile the pool. It is intentionally traceable (synthetic event_id) but has no on-chain counterpart.
-            insuance_timestamp = get_token_issuance_timestamp(self.realtoken_history, token_address)
-            token_price_at_insuance_timestamp = get_token_price_at_timestamp(self.realtoken_history, token_address, insuance_timestamp)
-            ts = insuance_timestamp.replace(tzinfo=timezone.utc) if insuance_timestamp.tzinfo is None else insuance_timestamp.timestamp.astimezone(timezone.utc)
+            issuance_timestamp = get_token_issuance_timestamp(self.realtoken_history, token_address)
+            token_price_at_issuance_timestamp = get_token_price_at_timestamp(self.realtoken_history, token_address, issuance_timestamp)
+            ts = issuance_timestamp.replace(tzinfo=timezone.utc) if issuance_timestamp.tzinfo is None else issuance_timestamp.astimezone(timezone.utc)
             consolidation_lot = {
                 "event_id": ("__consolidation__", 0),
                 "timestamp": ts,
                 "qty_remaining": missing_qty,
-                "price_per_token": Decimal(token_price_at_insuance_timestamp),
+                "price_per_token": Decimal(token_price_at_issuance_timestamp),
             }
             acquisition_lots.append(consolidation_lot)
 
+            _append_irr_cash_flow(
+                timestamp=ts,
+                amount=-(missing_qty * Decimal(token_price_at_issuance_timestamp)),
+            )
+        
         # ---- 5) Main loop: build pool from IN, create Realization for each OUT ----
         for ev in events:
 
@@ -410,6 +453,10 @@ class PerformanceCalculator:
                     "price_per_token": Decimal(ev.price_per_token),  # required for buy types
                 }
                 acquisition_lots.append(lot)
+                _append_irr_cash_flow(
+                    timestamp=ts,
+                    amount=-(Decimal(ev.amount) * Decimal(ev.price_per_token)),
+                )
                 continue
 
             # ---------------------------
@@ -432,9 +479,14 @@ class PerformanceCalculator:
 
                 weighted_avg_cost_used = total_cost / total_qty
 
-                # 2) Compute OUT values from the event
-                out_price_per_token = Decimal(ev.price_per_token)  # required for non-transfer events
+                # 2) Compute OUT values from the event and build an irr cash flow object
+                out_price_per_token = Decimal(ev.price_per_token)
                 out_total_price = amount_out * out_price_per_token
+
+                _append_irr_cash_flow(
+                    timestamp=ev.timestamp,
+                    amount=out_total_price,
+                )
 
                 # 3) Compute cost basis removed by this OUT using WAC
                 cost_basis_out = amount_out * weighted_avg_cost_used
@@ -479,5 +531,5 @@ class PerformanceCalculator:
             final_weighted_avg_cost = Decimal("0")
             final_avg_holding_days = 0.0
         
-        return realizations, final_weighted_avg_cost, final_avg_holding_days
+        return realizations, final_weighted_avg_cost, final_avg_holding_days, irr_cash_flows
 

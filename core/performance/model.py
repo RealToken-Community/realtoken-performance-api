@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Tuple, Iterable, Any, Dict
+from typing import Optional, Tuple, Iterable, Iterator, Any, Dict, List
 
 from core.income.model import WeeklyDistributionSeries
 
@@ -491,7 +491,6 @@ class DistributedIncomeIndicator:
         )
     
 
-
 class OverallPerformanceIndicator:
     """
     Final overall performance indicator built from realized gain, unrealized gain,
@@ -511,7 +510,7 @@ class OverallPerformanceIndicator:
         income_distributed: Decimal,
         total_cost_basis_realized: Decimal,
         total_cost_basis_unrealized: Decimal,
-        irr: Optional[Decimal],
+        irr: Decimal,
     ) -> None:
         self.realized_gain: Decimal = realized_gain
         self.unrealized_gain: Decimal = unrealized_gain
@@ -526,7 +525,7 @@ class OverallPerformanceIndicator:
             + self.income_distributed
         )
 
-        self.irr: Optional[Decimal] = irr
+        self.irr: Decimal = irr
 
     @property
     def total_cost_basis(self) -> Decimal:
@@ -546,6 +545,9 @@ class OverallPerformanceIndicator:
 
         def r(x: Optional[Decimal]) -> Optional[float]:
             return float(x.quantize(q)) if x is not None else None
+        
+        def r_pct(x: Optional[Decimal]) -> Optional[float]:
+            return float((x * Decimal("100")).quantize(q)) if x is not None else None
 
         return {
             "realized_gain": r(self.realized_gain),
@@ -554,7 +556,7 @@ class OverallPerformanceIndicator:
             "total_return": r(self.total_return),
             "total_cost_basis": r(self.total_cost_basis),
             "roi_pct": r(self.roi),
-            "irr_pct": r(self.irr),
+            "irr_pct": r_pct(self.irr),
         }
 
     def __repr__(self) -> str:
@@ -593,3 +595,185 @@ class OverallPerformanceIndicator:
             f"ROI:                        {fmt_pct(self.roi)}\n"
             f"IRR:                        {fmt_pct(self.irr)}"
         )
+    
+
+@dataclass(frozen=True, slots=True)
+class IRRCashFlow:
+    """
+    Single normalized cash flow used as input for IRR calculation.
+
+    Conventions:
+    - negative amount = cash outflow (investment, purchase, fees paid)
+    - positive amount = cash inflow (sale proceeds, income received, terminal value)
+
+    This object is intentionally generic and financial-only: it does not try to describe token movement semantics,
+    only the dated cash impact relevant for IRR computation.
+    """
+
+    timestamp: datetime
+    amount: Decimal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.timestamp, datetime):
+            raise TypeError("timestamp must be a datetime instance")
+
+        if self.timestamp.tzinfo is None:
+            raise ValueError("timestamp must be timezone-aware")
+
+        if not isinstance(self.amount, Decimal):
+            raise TypeError("amount must be a Decimal")
+
+        if self.amount == Decimal("0"):
+            raise ValueError("amount must be non-zero")
+
+    @property
+    def is_inflow(self) -> bool:
+        """Return True when the cash flow is positive."""
+        return self.amount > 0
+
+    @property
+    def is_outflow(self) -> bool:
+        """Return True when the cash flow is negative."""
+        return self.amount < 0
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "amount": str(self.amount),
+        }
+
+    def __repr__(self) -> str:
+        direction = "inflow" if self.amount > 0 else "outflow"
+        return (
+            f"IRRCashFlow(timestamp={self.timestamp.isoformat()}, "
+            f"amount={self.amount}, direction='{direction}', "
+        )
+
+
+@dataclass(slots=True)
+class IRRCashFlowSeries:
+    """
+    Collection of IRRCashFlow objects used to compute the annualized IRR
+    from irregularly dated cash flows.
+    """
+    _items: List[IRRCashFlow] = field(init=False, default_factory=list)
+    irr: Optional[Decimal] = field(init=False, default=None)
+
+    def __init__(self, cash_flows: Optional[Iterable[IRRCashFlow]] = None) -> None:
+        self._items = sorted(list(cash_flows or []), key=lambda cf: cf.timestamp)
+        self.irr = self._compute_irr()
+
+    @property
+    def cash_flows(self) -> List[IRRCashFlow]:
+        """
+        Return cash flows sorted chronologically.
+        """
+        return list(self._items)
+
+    def xnpv(self, rate: float) -> float:
+        """
+        Compute the NPV of irregularly dated cash flows for a given annual rate.
+        """
+        t0 = self._items[0].timestamp
+
+        total = 0.0
+        for cf in self._items:
+            days = (cf.timestamp - t0).total_seconds() / 86400.0
+            years = days / 365.0
+            total += float(cf.amount) / ((1.0 + rate) ** years)
+
+        return total
+
+    def _compute_irr(
+        self,
+        *,
+        guess: float = 0.10,
+        tolerance: float = 1e-10,
+        max_iterations: int = 100,
+    ) -> Optional[Decimal]:
+        """
+        Compute the annualized IRR of the series.
+
+        Returns None if no numerical solution is found.
+        """
+        # First attempt: Newton-Raphson
+        try:
+            rate = guess
+
+            for _ in range(max_iterations):
+                f = self.xnpv(rate)
+
+                h = 1e-6
+                f_plus = self.xnpv(rate + h)
+                f_minus = self.xnpv(rate - h)
+                derivative = (f_plus - f_minus) / (2.0 * h)
+
+                if abs(derivative) < 1e-18:
+                    break
+
+                new_rate = rate - (f / derivative)
+
+                if abs(new_rate - rate) < tolerance:
+                    return Decimal(str(new_rate))
+
+                rate = new_rate
+        except Exception:
+            pass
+
+        # Fallback: bracket search + bisection
+        brackets = [
+            (-0.9999, -0.5),
+            (-0.5, -0.1),
+            (-0.1, 0.0),
+            (0.0, 0.1),
+            (0.1, 0.25),
+            (0.25, 0.5),
+            (0.5, 1.0),
+            (1.0, 2.0),
+            (2.0, 5.0),
+            (5.0, 10.0),
+        ]
+
+        try:
+            for low, high in brackets:
+                f_low = self.xnpv(low)
+                f_high = self.xnpv(high)
+
+                if f_low * f_high > 0:
+                    continue
+
+                for _ in range(max_iterations):
+                    mid = (low + high) / 2.0
+                    f_mid = self.xnpv(mid)
+
+                    if abs(f_mid) < tolerance or abs(high - low) < tolerance:
+                        return Decimal(str(mid))
+
+                    if f_low * f_mid < 0:
+                        high = mid
+                    else:
+                        low = mid
+                        f_low = f_mid
+        except Exception:
+            pass
+
+        return None
+    
+    def to_dict(self, places: int = 4) -> Dict[str, Any]:
+        q = Decimal("1").scaleb(-places)
+    
+        def r(x: Optional[Decimal]) -> Optional[float]:
+            return float(x.quantize(q)) if x is not None else None
+    
+        return {
+            "irr": r(self.irr),
+        }
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __iter__(self) -> Iterator[IRRCashFlow]:
+        return iter(self._items)
+
+    def __repr__(self) -> str:
+        return f"IRRCashFlowSeries(count={len(self._items)}, irr={self.irr})"
