@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 from eth_utils import to_checksum_address
+from decimal import Decimal
 
 
 TokenAddress = str
@@ -194,7 +195,23 @@ class WeeklyDistributionSeries:
 
         # Same (year, week) and same wallets -> reject duplicate to avoid silent overwrite
         raise ValueError(f"Duplicate WeeklyDistribution for {key} already exists.")
-
+    
+    def cash_flow_amount_and_date_for_token(self, token: str) -> List[Tuple[Decimal, datetime]]:
+        """
+        Return a chronologically ordered list of cash flow pairs for one token:
+        (revenue amount for the week, week start date in UTC).
+        """
+        t = to_checksum_address(token.strip())
+    
+        pairs: List[Tuple[Decimal, datetime]] = []
+    
+        for d in self.distributions:
+            amount = Decimal(d.total_by_token.get(t, Decimal("0")))
+            if amount != 0:
+                pairs.append((amount, d.week_start_utc))
+    
+        return pairs
+        
     # ----------------------------
     # Aggregations across weeks
     # ----------------------------
