@@ -5,9 +5,11 @@ import json
 from typing import Any, Dict
 from flask import Flask, jsonify, current_app
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from config.logging_config_api import setup_logging
-from config.settings import API_URL_PREFIX_V1
+from config.settings import API_URL_PREFIX_V1, RATE_LIMITER_ENABLED, RATE_LIMITER_PARAMS
 from core.services.send_telegram_alert import send_telegram_alert
 from core.services.utilities import test_postgres_connection
 from api.routes.v1 import v1_bp
@@ -42,6 +44,10 @@ def _register_error_handlers(app: Flask) -> None:
     @app.errorhandler(405)
     def method_not_allowed(_: Exception):  # type: ignore[override]
         return jsonify({"error": "method_not_allowed"}), 405
+    
+    @app.errorhandler(429)
+    def ratelimit_handler(_: Exception):  # type: ignore[override]
+        return jsonify({"error": "rate_limit_exceeded"}), 429
 
     @app.errorhandler(500)
     def internal_error(e: Exception):  # type: ignore[override]
@@ -81,6 +87,16 @@ def create_app() -> Flask:
 
     # Maximum size of paylaod (8 KB)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
+
+    # Set up rate limiter
+    limiter = None
+    if RATE_LIMITER_ENABLED:
+        limiter = Limiter(
+            key_func=get_remote_address,
+            app=app,
+            storage_uri="memory://",
+            default_limits=RATE_LIMITER_PARAMS,
+        )
     
     try:
         with open('Ressources/blockchain_contracts.json', 'r') as contracts_file:

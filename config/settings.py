@@ -21,6 +21,9 @@ API_URL_PREFIX_V1="/api/v1"
 CACHE_ENABLED = True
 CACHE_TTL_SECONDS = 18 * 60 * 60
 
+RATE_LIMITER_ENABLED = True
+RATE_LIMITER_PARAMS = ["1 per 10 seconds", "10 per hour"]
+
 # Google drive rent files
 RENT_FILES_FOLDER_ID = "1hmlw04fNhj-1nN0S493fheLzcZOLai_G"
 
