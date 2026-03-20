@@ -10,14 +10,21 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from eth_utils import to_checksum_address
 from diskcache import Cache
-from config.settings import CACHE_ENABLED, CACHE_TTL_SECONDS
+from config.settings import (
+    CACHE_ENABLED,
+    CACHE_TTL_SECONDS,
+    SWAPCAT_REALTOKEN_GNOSIS_SUBGRAPH_ID,
+    RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID,
+    REALTOKEN_GNOSIS_SUBGRAPH_ID,
+)
 from job.utilities import load_json
 from core.services.send_telegram_alert import send_telegram_alert
 from core.services.get_all_user_linked_addresses import get_all_user_linked_addresses
 from core.realtoken_event_history.event_fetchers import (
     fetch_realtoken_transfers,
     fetch_liquidations_rmm_v3,
-    fetch_yam_v1_events
+    fetch_yam_v1_events,
+    fetch_swapcat_events
 )
 from core.realtoken_event_history.event_normalizers import (
     extract_user_purchases_from_realt,
@@ -28,7 +35,8 @@ from core.realtoken_event_history.event_normalizers import (
     normalize_internal_transfer,
     normalize_liquidations_rmm_v3,
     normalize_realt_purchases,
-    normalize_yam_offers
+    normalize_yam_offers,
+    normalize_swapcat_offers
 )
 from core.realtoken_event_history.model import RealtokenEventHistory, RealtokenEventType
 from core.balance_snapshots.balance_fetchers.fetch_current_realtoken_balances import fetch_current_realtoken_balances_aggregated
@@ -75,8 +83,6 @@ def realtokens_performance():
         
         POSTGRES_DATA = current_app.config['POSTGRES_DATA']
         THE_GRAPH_API_KEY = current_app.config['THE_GRAPH_API_KEY']
-        REALTOKEN_GNOSIS_SUBGRAPH_ID = current_app.config['REALTOKEN_GNOSIS_SUBGRAPH_ID']
-        RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID = current_app.config['RMMV3_WRAPPER_GNOSIS_SUBGRAPH_ID']
         BLOCKCHAIN_CONTRACTS = current_app.config['BLOCKCHAIN_CONTRACTS']
 
         
@@ -103,7 +109,7 @@ def realtokens_performance():
         now = datetime.now(timezone.utc)
     
         # Parallelize the network/IO work:
-        with ThreadPoolExecutor(max_workers=5) as ex:
+        with ThreadPoolExecutor(max_workers=6) as ex:
             
             # --- RealToken transfers (The Graph) ---
             user_transfers_task = ex.submit(
@@ -143,7 +149,18 @@ def realtokens_performance():
                 datetime(2019, 1, 1),
                 now,
                 POSTGRES_DATA,
-            )        
+            )
+
+            # --- fetch swapcat events ---
+            swapcat_events_task = ex.submit(
+                fetch_swapcat_events,
+                SWAPCAT_REALTOKEN_GNOSIS_SUBGRAPH_ID,
+                THE_GRAPH_API_KEY,
+                wallets,
+            )
+
+            
+                    
             
             user_transfers  = user_transfers_task.result()
             realt_purchases = extract_user_purchases_from_realt(user_transfers["data"]["inTransfers"], realtoken_data, realtoken_history)
@@ -152,6 +169,7 @@ def realtokens_performance():
             current_balances = current_balances_task.result()
             income_distributions = income_distributions_task.result()
             offers_seller, offers_buyer = yam_v1_events_task.result()
+            swapcat_events = swapcat_events_task.result()
     
     
         # ---- normalize data for the realtoken_event_history -----
@@ -160,6 +178,7 @@ def realtokens_performance():
         normalized_yam_offers = normalize_yam_offers(offers_buyer + offers_seller, wallets, BLOCKCHAIN_CONTRACTS, realtoken_data)
         normalized_liquidations_rmm_v3 = normalize_liquidations_rmm_v3(rmmv3_liquidations, wallets, realtoken_history)
         normalized_detokenisation = normalize_detokenisation(detokenisations_events)
+        normalized_swapcat_offers = normalize_swapcat_offers(swapcat_events, wallets, BLOCKCHAIN_CONTRACTS, realtoken_data)
     
         # ------ RealtokenEventHistory --------
         realtoken_event_history = RealtokenEventHistory()
@@ -168,6 +187,7 @@ def realtokens_performance():
         realtoken_event_history.add(normalized_yam_offers)
         realtoken_event_history.add(normalized_liquidations_rmm_v3)
         realtoken_event_history.add(normalized_detokenisation)
+        realtoken_event_history.add(normalized_swapcat_offers)
         realtoken_event_history.sort_events_by_timestamp()
     
         # ----- balances -----
