@@ -14,3 +14,4 @@ data/realtokens_data.json
 data/realtokens_history.json
 data/rent_files_parquet/parquet_by_year/*
 !data/rent_files_parquet/parquet_by_year/.gitkeep
+google-drive-service-account.json
