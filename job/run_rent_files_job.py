@@ -41,12 +41,16 @@ def run_rent_files_job():
     """
     
     logger.info("starting rent files job")
-     
-    # Build Google Drive API credentials
-    credentials = build_google_credentials()
 
-    # Retrieve all files in the configured Drive folder
-    all_files = list_all_files_flat(RENT_FILES_FOLDER_ID, credentials)
+    try:
+        # Build Google Drive API credentials
+        credentials = build_google_credentials()
+
+        # Retrieve all files in the configured Drive folder
+        all_files = list_all_files_flat(RENT_FILES_FOLDER_ID, credentials)
+    except Exception:
+        logger.exception("Failed to list files from Google Drive")
+        send_telegram_alert("Realtoken-Performance-api: Failed to list files from Google Drive")
 
     # Load the set of already processed Google Drive file IDs
     files_already_processed = load_processed_ids()
