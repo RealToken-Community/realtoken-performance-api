@@ -2,3 +2,4 @@ from .fetch_liquidations_rmm_v3 import fetch_liquidations_rmm_v3
 from .fetch_realtoken_transfers import fetch_realtoken_transfers
 from .fetch_yam_v1_events import fetch_yam_v1_events
 from .get_liquidatied_realtoken_rmmV3_by_tx import get_liquidatied_realtoken_rmmV3_by_tx
+from .fetch_swapcat_events import fetch_swapcat_events

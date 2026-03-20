@@ -5,3 +5,4 @@ from .normalize_yam_offers import normalize_yam_offers
 from .normalize_detokenisation import normalize_detokenisation
 from .extract_user_purchases_from_realt import extract_user_purchases_from_realt
 from .extract_detokenisations import extract_detokenisations
+from .normalize_swapcat_offers import normalize_swapcat_offers
