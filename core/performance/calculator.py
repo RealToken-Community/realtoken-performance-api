@@ -250,7 +250,7 @@ class PerformanceCalculator:
 
         # Small epsilon to clean up tiny Decimal dust created by proportional reductions.
         # This prevents ending with 1E-27 quantities after repeated prorata reductions.
-        EPS = Decimal("0.000000000000000001")
+        EPS = Decimal("1E-24")
 
         # ---- helper functions (kept simple & explicit) ----
         def _pool_total_qty() -> Decimal:
