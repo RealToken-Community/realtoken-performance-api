@@ -1,0 +1,127 @@
+name: Test and deploy to branch
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Validate branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+  deploy:
+    name: Deploy to branch
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Build and push realtoken-performance-api image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfile
+          push: true
+          tags: ${{ secrets.DOCKER_REGISTRY }}/realtokens-performance-api:latest
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "$SSH_KEY" > ~/.ssh/staging.key
+          chmod 600 ~/.ssh/staging.key
+          cat >>~/.ssh/config <<END
+          Host staging
+            HostName $SSH_HOST
+            User $SSH_USER
+            Port $SSH_PORT
+            IdentityFile ~/.ssh/staging.key
+            StrictHostKeyChecking no
+          END
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+
+      - name: Update branch environment
+        env:
+          DOCKER_BRANCH: ${{ github.ref_name }}
+          DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+          DOCKER_LOGIN: ${{ secrets.DOCKER_LOGIN }}
+          DOCKER_PASSWD: ${{ secrets.DOCKER_PASSWD }}
+          DOMAIN_URL: ${{ secrets.DOMAIN_URL }}
+
+          RPC_URLS: ${{ secrets.RPC_URLS }}
+          THE_GRAPH_API_KEY: ${{ secrets.THE_GRAPH_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 }}
+          API_PORT_INTERNAL: ${{ vars.API_PORT_INTERNAL }}
+          CORS_ORIGIN_REGEX: ${{ vars.CORS_ORIGIN_REGEX }}
+          TELEGRAM_ALERT_BOT_TOKEN: ${{ secrets.TELEGRAM_ALERT_BOT_TOKEN }}
+          TELEGRAM_ALERT_GROUP_ID: ${{ vars.TELEGRAM_ALERT_GROUP_ID }}
+
+          # Postgres
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+          POSTGRES_READER_USER_NAME: ${{ vars.POSTGRES_READER_USER_NAME }}
+          POSTGRES_READER_USER_PASSWORD: ${{ secrets.POSTGRES_READER_USER_PASSWORD }}
+
+        run: |
+          if [[ "$DOCKER_BRANCH" == "main" ]]; then
+            export HOSTNAME="performance.$DOMAIN_URL"
+          elif [[ "$DOCKER_BRANCH" == "staging" ]]; then
+            export HOSTNAME="performance.$DOCKER_BRANCH.$DOMAIN_URL"
+          else
+            export HOSTNAME="performance.$DOCKER_BRANCH.$DOMAIN_URL"
+          fi
+        
+          ssh staging <<EOF
+            set -euxo pipefail
+        
+            export DOCKER_BRANCH="$DOCKER_BRANCH"
+            export DOCKER_REGISTRY="$DOCKER_REGISTRY"
+            export HOSTNAME="$HOSTNAME"
+        
+            export API_PORT_INTERNAL="$API_PORT_INTERNAL"
+            export CORS_ORIGIN_REGEX="$CORS_ORIGIN_REGEX"
+            export THE_GRAPH_API_KEY="$THE_GRAPH_API_KEY"
+            export RPC_URLS="$RPC_URLS"
+            export GOOGLE_SERVICE_ACCOUNT_JSON_BASE64="$GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"
+        
+            export POSTGRES_DB="$POSTGRES_DB"
+            export POSTGRES_HOST="$POSTGRES_HOST"
+            export POSTGRES_PORT="$POSTGRES_PORT"
+            export POSTGRES_READER_USER_NAME="$POSTGRES_READER_USER_NAME"
+            export POSTGRES_READER_USER_PASSWORD="$POSTGRES_READER_USER_PASSWORD"
+        
+            export TELEGRAM_ALERT_BOT_TOKEN="$TELEGRAM_ALERT_BOT_TOKEN"
+            export TELEGRAM_ALERT_GROUP_ID="$TELEGRAM_ALERT_GROUP_ID"
+        
+            cd /var/docker/realtokens-performance-api/\$DOCKER_BRANCH
+            git pull origin \$DOCKER_BRANCH
+        
+            docker login -u "$DOCKER_LOGIN" -p "$DOCKER_PASSWD" $DOCKER_REGISTRY
+        
+            docker compose --project-name \$DOCKER_BRANCH-realtokens-performance-api --file docker-compose-branch.yml pull
+            docker compose --project-name \$DOCKER_BRANCH-realtokens-performance-api --file docker-compose-branch.yml up -d --remove-orphans
+          EOF

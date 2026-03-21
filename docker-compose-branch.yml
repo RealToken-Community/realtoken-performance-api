@@ -1,0 +1,46 @@
+services:
+  realtokens-performance-api:
+    image: ${DOCKER_REGISTRY}/realtokens-performance-api:latest
+    container_name: ${DOCKER_BRANCH}-realtokens-performance-api
+    environment:
+
+      # App config
+      RPC_URLS: "${RPC_URLS}"
+      THE_GRAPH_API_KEY: "${THE_GRAPH_API_KEY}"
+      GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64}"
+      API_PORT_INTERNAL: "${API_PORT_INTERNAL}"
+      CORS_ORIGIN_REGEX: "${CORS_ORIGIN_REGEX}"
+      TELEGRAM_ALERT_BOT_TOKEN: "${TELEGRAM_ALERT_BOT_TOKEN}"
+      TELEGRAM_ALERT_GROUP_ID: "${TELEGRAM_ALERT_GROUP_ID}"
+
+      # Postgres
+      POSTGRES_DB: "${POSTGRES_DB}"
+      POSTGRES_HOST: "${POSTGRES_HOST}"
+      POSTGRES_PORT: "${POSTGRES_PORT}"
+      POSTGRES_READER_USER_NAME: "${POSTGRES_READER_USER_NAME}"
+      POSTGRES_READER_USER_PASSWORD: "${POSTGRES_READER_USER_PASSWORD}"
+
+    networks:
+      - traefik-realt
+      - yam-graph
+
+    volumes:
+      - realtokens-performance-logs:/app/logs
+      - rent-files-parquet:/app/data/rent_files_parquet
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.realtokens-performance-api-${DOCKER_BRANCH}.rule=Host(`${HOSTNAME}`) && PathPrefix(`/api`)"
+      - "traefik.http.services.realtokens-performance-api-${DOCKER_BRANCH}.loadbalancer.server.port=${API_PORT_INTERNAL}"
+
+    restart: unless-stopped
+
+volumes:
+  realtokens-performance-logs:
+  rent-files-parquet:
+
+networks:
+  traefik-realt:
+    external: true
+  yam-graph:
+    external: true
