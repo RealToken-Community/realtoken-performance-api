@@ -1,5 +1,21 @@
 # RealToken Performance API
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Performance Indicators](#performance-indicators)
+  - [Realized Gain](#1-realized-gain)
+  - [Unrealized Gain](#2-unrealized-gain)
+  - [Distributed Income](#3-distributed-income)
+  - [Overall Performance](#4-overall-performance)
+- [Wallet resolution](#wallet-resolution)
+- [API Endpoints](#api-endpoints)
+  - [Health Check](#health-check)
+  - [Realtoken Performance](#realtoken-performance)
+- [Events included in performance calculations](#events-included-in-performance-calculations)
+
+------------------------------------------------------------------------ 
+
 ## Overview
 
 The **RealToken Performance API** calculates and exposes financial
@@ -34,7 +50,7 @@ Realized gain represents the profit or loss generated from **completed
 sales of tokens**.
 
 A realized gain occurs when tokens leave the portfolio (for example
-through a sale or liquidation).
+through a sale, a detokenisation or being liquidated).
 
 The gain is calculated using the **Weighted Average Cost (WAC)** method:
 
@@ -58,33 +74,29 @@ are still held**.
 
 It is calculated by comparing:
 
--   the **current market value of held tokens**
+-   the **current Realt value of held tokens**
 -   the **average acquisition price of those tokens**
 
 Conceptually:
 
-    Unrealized Gain = Current Value - Cost Basis of Held Tokens
+    Unrealized Gain = Current Realt Value - Cost Basis of Held Tokens
 
 This metric reflects the **potential gain if the position were sold at
-the current price**.
+the current Realt price**.
 
 ------------------------------------------------------------------------
 
 ### 3. Distributed Income
 
-Distributed income corresponds to **rental income paid by RealToken
-properties**.
-
-RealToken holders periodically receive rental distributions based on the
-number of tokens they own.
+Distributed income corresponds to **income paid by Realtoken**.
 
 The API aggregates all distributions received across time.
 
 Conceptually:
 
-    Distributed Income = Sum of all rental payments received
+    Distributed Income = Sum of all payments received
 
-This component is a **core part of the RealToken investment return**.
+The total distributed income is calculated by aggregating all payments listed in the CSV income files provided by RealT.
 
 ------------------------------------------------------------------------
 
@@ -107,15 +119,12 @@ performance**.
 
 ## Wallet resolution
 
-Only **one wallet address** needs to be provided.
+Only **one wallet address** is required.
 
-When the API receives a wallet address, it automatically retrieves **all
-wallets associated with the same RealT user ID** and computes the
-performance **across the entire set of linked wallets**.
+The API automatically retrieves **all wallets linked to the same RealT user ID** and computes performance across the entire set.
 
-This ensures that the portfolio performance reflects the **full
-investment activity of the user**, even if tokens are distributed across
-several wallets.
+This is intentional: due to **internal transfers between wallets**, calculating performance on a single wallet can be misleading (e.g. tokens received without a purchase).  
+For consistency, performance is always computed **at the user level (all linked wallets)**.
 
 ------------------------------------------------------------------------
 
@@ -136,7 +145,7 @@ Returns the operational status of the API.
 
 ------------------------------------------------------------------------
 
-### Portfolio Performance
+### Realtoken Performance
 
     GET /api/v1/realtokens-performance
 
@@ -206,15 +215,28 @@ Example response structure:
 
 ## Events included in performance calculations
 
-The performance calculator builds a **normalized event history** from several data sources. Only events that represent **acquisitions (IN)** or **disposals (OUT)** of tokens are used for cost basis and realized PnL.
+The performance calculator builds a **normalized event history** from several data sources.
 
 The following **event types** are included in the calculation:
 
 | Event type | Description |
 |------------|-------------|
-| **Purchases from RealT** | Direct purchases of Realtokens from the RealT platform. |
-| **Transactions from YAM (v1)** | Buys and sells of Realtokens via the YAM protocol |
-| **RMM v3 liquidations** | When the user **receives** tokens from an RMM v3 liquidation, this is an IN position. When the user’s position is **liquidated** (tokens taken), this is an OUT disposals. |
-| **Detokenizations** | Redemption of Realtokens for the underlying asset. |
+| **Purchases from RealT** (gnosis) | Direct purchases of Realtokens from the RealT platform. |
+| **YAM** (v1) (gnosis)| Buys and sells of Realtokens via the YAM smart contract |
+| **SwapCat** (gnosis)| Buys and sells of Realtokens via the SwapCat contract |
+| **RMM liquidations** (v3) | When the user **receives** tokens from an RMM v3 liquidation, this is an IN position. When the user’s position is **liquidated** (tokens taken), this is an OUT disposals. |
+| **Detokenizations** (gnosis) | Redemption of Realtokens for the underlying asset. |
+| **Distributed income** | Aggregation of the CSV income files provided by RealT. |
 
 The API response includes an **`event_types`** array listing all event type labels, and an **`events`** object containing the full list of normalized events per token that were used to compute the performance. This allows auditors or integrators to verify exactly which on-chain and off-chain data fed into the metrics.
+
+#### Event types not yet implemented (to be added)
+
+- [ ] **YAM** (v1) (ethereum)
+- [ ] **RMM Liquidations** (v2)
+- [ ] **Purchases from RealT** (ethereum)  
+- [ ] **Limited sale purchases from Realt** (gnosis & ethereum)
+- [ ] **LevinSwap LP positions** (balances)
+- [ ] **LevinSwap LP PnL** (pool rebalancing / impermanent loss / swaps)
+
+
