@@ -223,17 +223,32 @@ The following **event types** are included in the calculation:
 |------------|-------------|
 | **Purchases from RealT** (gnosis) | Direct purchases of Realtokens from the RealT platform. |
 | **YAM** (v1) (gnosis)| Buys and sells of Realtokens via the YAM smart contract |
-| **SwapCat** (gnosis)| Buys and sells of Realtokens via the SwapCat contract |
+| **SwapCat** (gnosis)| Buys and sells of Realtokens via the SwapCat smart contract |
 | **RMM liquidations** (v3) | When the user **receives** tokens from an RMM v3 liquidation, this is an IN position. When the user’s position is **liquidated** (tokens taken), this is an OUT disposals. |
 | **Detokenizations** (gnosis) | Redemption of Realtokens for the underlying asset. |
 | **Distributed income** | Aggregation of the CSV income files provided by RealT. |
 
-The API response includes an **`event_types`** array listing all event type labels, and an **`events`** object containing the full list of normalized events per token that were used to compute the performance. This allows auditors or integrators to verify exactly which on-chain and off-chain data fed into the metrics.
+The API response includes an **`event_types`** array listing all event type labels, and an **`events`** object containing the full list of normalized events per token that were used to compute the performance. 
 
-#### Event types not yet implemented (to be added)
+### Event consolidation (handling missing data)
+
+In some cases, the available event history is **incomplete** (e.g. missing buy or sell events).  
+This can lead to inconsistencies between the reconstructed balance and the **actual wallet balance at a given time**.
+
+To address this, the API performs a **virtual consolidation**:
+
+- Missing quantities are adjusted by injecting **virtual events**
+- These events are **not included in the event history output**
+- They are used **only internally for performance calculations**
+
+These virtual events assume a **purchase at the RealT listing price** (initial price when the token was released on the platform).
+
+
+### Event types not yet implemented (to be added)
 
 - [ ] **YAM** (v1) (ethereum)
 - [ ] **RMM Liquidations** (v2)
+- [ ] **Detokenizations** (ethereum)
 - [ ] **Purchases from RealT** (ethereum)  
 - [ ] **Limited sale purchases from Realt** (gnosis & ethereum)
 - [ ] **LevinSwap LP positions** (balances)
