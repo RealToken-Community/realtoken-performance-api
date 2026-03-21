@@ -117,7 +117,7 @@ jobs:
             export TELEGRAM_ALERT_BOT_TOKEN="$TELEGRAM_ALERT_BOT_TOKEN"
             export TELEGRAM_ALERT_GROUP_ID="$TELEGRAM_ALERT_GROUP_ID"
         
-            cd /var/docker/realtokens-performance-api/\$DOCKER_BRANCH
+            cd /var/docker/performance/api/\$DOCKER_BRANCH
             git pull origin \$DOCKER_BRANCH
         
             docker login -u "$DOCKER_LOGIN" -p "$DOCKER_PASSWD" $DOCKER_REGISTRY
