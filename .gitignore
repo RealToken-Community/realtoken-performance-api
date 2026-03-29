@@ -76,6 +76,8 @@ data/rent_files_parquet/parquet_by_year/*
 data/rent_files_csv/errors/*
 !data/rent_files_csv/errors/.gitkeep
 data/rent_files_csv/*.csv
+data/rent_files_duckdb/*
+!data/rent_files_duckdb/.gitkeep
 
 
 # =========================

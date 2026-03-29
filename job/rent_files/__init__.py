@@ -5,4 +5,5 @@ from .download_drive_file import download_drive_file
 from .build_google_credentials import build_google_credentials
 from .extract_year_week import extract_year_week
 from .upsert_weekly_rent_csv_to_quarter_parquet import upsert_weekly_rent_csv_to_quarter_parquet
+from .upsert_weekly_rent_csv_to_duckdb import upsert_weekly_rent_csv_to_duckdb
 from .save_processed_id import save_processed_id
