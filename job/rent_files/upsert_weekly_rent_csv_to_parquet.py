@@ -33,15 +33,24 @@ def _open_text_stream(csv_input: CsvInput) -> IO[str]:
     return csv_input  # type: ignore[return-value]
 
 
-def _quarter_label_for_week(week: int) -> str:
-    if 1 <= week <= 13:
-        return "q1_weeks01-13"
-    if 14 <= week <= 26:
-        return "q2_weeks14-26"
-    if 27 <= week <= 39:
-        return "q3_weeks27-39"
-    if 40 <= week <= 53:
-        return "q4_weeks40-53"
+def _partition_label_for_week(week: int) -> str:
+    if 1 <= week <= 6:
+        return "p1_weeks01-06"
+    if 7 <= week <= 13:
+        return "p2_weeks07-13"
+    if 14 <= week <= 19:
+        return "p3_weeks14-19"
+    if 20 <= week <= 26:
+        return "p4_weeks20-26"
+    if 27 <= week <= 32:
+        return "p5_weeks27-32"
+    if 33 <= week <= 39:
+        return "p6_weeks33-39"
+    if 40 <= week <= 46:
+        return "p7_weeks40-46"
+    if 47 <= week <= 53:
+        return "p8_weeks47-53"
+
     raise ValueError(f"Invalid ISO week: {week}. Expected 1..53.")
 
 
@@ -279,7 +288,7 @@ def _parse_weekly_csv_to_long_df(
     return _normalize_long_df(long_df)
 
 
-def upsert_weekly_rent_csv_to_quarter_parquet(
+def upsert_weekly_rent_csv_to_parquet(
     csv_path: Union[str, Path],
     year: int,
     week: int,
@@ -302,11 +311,11 @@ def upsert_weekly_rent_csv_to_quarter_parquet(
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-    quarter_label = _quarter_label_for_week(int(week))
+    partition_label = _partition_label_for_week(int(week))
     year_dir = parquet_root / f"year={int(year)}"
     year_dir.mkdir(parents=True, exist_ok=True)
 
-    parquet_path = year_dir / f"{quarter_label}.parquet"
+    parquet_path = year_dir / f"{partition_label}.parquet"
 
     new_week_df = _parse_weekly_csv_to_long_df(
         csv_path,

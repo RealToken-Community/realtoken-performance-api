@@ -10,7 +10,7 @@ from job.rent_files import (
     get_new_files,
     download_drive_file,
     extract_year_week,
-    upsert_weekly_rent_csv_to_quarter_parquet,
+    upsert_weekly_rent_csv_to_parquet,
     save_processed_id,
 )
 
@@ -69,7 +69,7 @@ def run_rent_files_job():
             year, week = extract_year_week(path_csv_file_downloaded)
 
             # Convert CSV data and upsert it into the quarterly parquet dataset
-            path_parquet_file = upsert_weekly_rent_csv_to_quarter_parquet(
+            path_parquet_file = upsert_weekly_rent_csv_to_parquet(
                 path_csv_file_downloaded,
                 year,
                 week,

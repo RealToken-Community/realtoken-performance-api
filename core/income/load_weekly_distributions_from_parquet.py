@@ -31,7 +31,7 @@ def load_weekly_distributions_from_parquet(
 
     Args:
         wallets: Wallet addresses to load distributions for.
-        parquet_root: Root folder containing yearly quarter parquet files.
+        parquet_root: Root folder containing yearly parquet partitions.
 
     Returns:
         A list of WeeklyDistribution objects.
