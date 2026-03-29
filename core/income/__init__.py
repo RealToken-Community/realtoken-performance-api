@@ -1,2 +1,1 @@
 from .load_weekly_distributions_from_parquet import load_weekly_distributions_from_parquet
-from .load_weekly_distributions_from_duckdb import load_weekly_distributions_from_duckdb

@@ -5,27 +5,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps (optional but common)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     supervisor \
  && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps first (better layer cache)
+
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir --no-compile -r requirements.txt
 
 # Copy the application
-COPY . /app
+COPY api ./api
+COPY core ./core
+COPY config ./config
+COPY job ./job
+COPY data ./data
+COPY Ressources ./Ressources
+COPY supervisord.conf .
+COPY entrypoint.sh .
 
-# Create logs directory (your app writes to /app/logs)
+# Create logs directory
 RUN mkdir -p /app/logs
 
-# Copy supervisord config
-COPY supervisord.conf /app/supervisord.conf
-
-# Entrypoint
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && mkdir -p /app/logs
 
 CMD ["/app/entrypoint.sh"]
