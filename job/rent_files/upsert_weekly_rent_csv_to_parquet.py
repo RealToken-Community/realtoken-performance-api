@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import IO, Any, Dict, List, Optional, Tuple, Union
 
@@ -82,7 +84,6 @@ def _detect_header_and_token_row(
     header_row_idx: Optional[int] = None
     investor_column_name_found: Optional[str] = None
 
-    # 1) Detect header row
     for idx, row in enumerate(preview_rows):
         normalized = [_normalize(c) for c in row]
 
@@ -100,11 +101,8 @@ def _detect_header_and_token_row(
             f"Could not detect header row containing one of: {investor_column_candidates}"
         )
 
-    # 2) Detect token row:
-    #    first try above header, then below header
     token_row_idx: Optional[int] = None
 
-    # Search above header
     start_above = max(0, header_row_idx - token_row_search_window)
     for idx in range(header_row_idx - 1, start_above - 1, -1):
         normalized = [_normalize(c) for c in preview_rows[idx]]
@@ -112,7 +110,6 @@ def _detect_header_and_token_row(
             token_row_idx = idx
             break
 
-    # Search below header if not found above
     if token_row_idx is None:
         end_below = min(len(preview_rows), header_row_idx + 1 + token_row_search_window)
         for idx in range(header_row_idx + 1, end_below):
@@ -183,18 +180,45 @@ def _normalize_long_df(df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
 
     out = df.copy()
-    out["year"] = out["year"].astype(int)
-    out["week"] = out["week"].astype(int)
+    out["year"] = out["year"].astype("int32")
+    out["week"] = out["week"].astype("int16")
     out["currency"] = out["currency"].astype(str).str.upper().str.strip()
     out["investor"] = out["investor"].astype(str).str.lower().str.strip()
     out["token"] = out["token"].astype(str).str.lower().str.strip()
-    out["amount"] = pd.to_numeric(out["amount"], errors="coerce").fillna(0.0).astype(float)
+    out["amount"] = pd.to_numeric(out["amount"], errors="coerce").fillna(0.0).astype("float64")
 
     out = out.sort_values(
-        by=["year", "week", "currency", "investor", "token"]
+        by=["year", "week", "currency", "investor", "token"],
+        kind="mergesort",
     ).reset_index(drop=True)
 
     return out
+
+
+def _safe_float(value: Any) -> float:
+    text = _normalize(value)
+    if text == "":
+        return 0.0
+
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return 0.0
+
+    if not math.isfinite(number):
+        return 0.0
+
+    return number
+
+
+def _read_header_columns(csv_path: Union[str, Path], header_row_idx: int) -> List[str]:
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.reader(stream, delimiter=",")
+        for idx, row in enumerate(reader):
+            if idx == header_row_idx:
+                return [_normalize(c) for c in row]
+
+    raise ValueError("Could not read detected header row from CSV.")
 
 
 def _parse_weekly_csv_to_long_df(
@@ -206,13 +230,7 @@ def _parse_weekly_csv_to_long_df(
 ) -> pd.DataFrame:
     header_row_idx, token_row, investor_column_name = _detect_header_and_token_row(csv_path)
 
-    header_df = pd.read_csv(
-        csv_path,
-        skiprows=header_row_idx,
-        nrows=0,
-        engine="c",
-    )
-    columns = list(header_df.columns)
+    columns = _read_header_columns(csv_path, header_row_idx)
 
     if investor_column_name not in columns:
         raise ValueError(f"Column '{investor_column_name}' not found after header detection.")
@@ -223,67 +241,67 @@ def _parse_weekly_csv_to_long_df(
     if not token_columns:
         raise ValueError("No token columns detected.")
 
-    usecols = [investor_column_name] + token_columns
+    investor_col_idx = columns.index(investor_column_name)
+    token_col_indices = [(columns.index(col), col_to_token[col].lower()) for col in token_columns]
 
-    df = pd.read_csv(
-        csv_path,
-        skiprows=header_row_idx,
-        header=0,
-        usecols=usecols,
-        engine="c",
-    )
+    aggregated: Dict[Tuple[str, str], float] = defaultdict(float)
 
-    df[investor_column_name] = (
-        df[investor_column_name]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-    )
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.reader(stream, delimiter=",")
 
-    investor_mask = df[investor_column_name].apply(_is_evm_address)
-    investors_df = df.loc[investor_mask].copy()
+        for row_idx, row in enumerate(reader):
+            if row_idx <= header_row_idx:
+                continue
 
-    if investors_df.empty:
-        raise ValueError(
-            f"No valid EVM investor address found in the '{investor_column_name}' column."
-        )
+            investor_raw = row[investor_col_idx] if investor_col_idx < len(row) else ""
+            investor = _normalize(investor_raw).lower()
 
-    token_block = investors_df[token_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+            if not _is_evm_address(investor):
+                continue
 
-    token_labels = [col_to_token[col].lower() for col in token_columns]
-    token_block.columns = token_labels
-    token_block = token_block.T.groupby(level=0).sum().T
+            for col_idx, token in token_col_indices:
+                raw_amount = row[col_idx] if col_idx < len(row) else ""
+                amount = _safe_float(raw_amount)
 
-    long_df = (
-        token_block
-        .assign(investor=investors_df[investor_column_name].values)
-        .melt(id_vars=["investor"], var_name="token", value_name="amount")
-    )
+                if amount != 0.0:
+                    aggregated[(investor, token)] += amount
 
-    long_df["investor"] = long_df["investor"].astype(str).str.lower().str.strip()
-    long_df["token"] = long_df["token"].astype(str).str.lower().str.strip()
-
-    long_df = long_df[long_df["amount"] != 0.0].copy()
-
-    long_df = (
-        long_df.groupby(["investor", "token"], as_index=False)["amount"]
-        .sum()
-    )
-
-    if long_df.empty:
+    if not aggregated:
         raise ValueError(
             "Parsing succeeded structurally, but no non-zero investor/token revenue row was found."
         )
 
-    if not long_df["investor"].map(_is_evm_address).all():
-        raise ValueError("At least one parsed investor is not a valid EVM address.")
+    records = []
+    for (investor, token), amount in aggregated.items():
+        if amount == 0.0:
+            continue
 
-    if not long_df["token"].map(_is_evm_address).all():
-        raise ValueError("At least one parsed token is not a valid EVM address.")
+        if not _is_evm_address(investor):
+            raise ValueError("At least one parsed investor is not a valid EVM address.")
 
-    long_df.insert(0, "currency", paid_in_currency.upper())
-    long_df.insert(0, "week", int(week))
-    long_df.insert(0, "year", int(year))
+        if not _is_evm_address(token):
+            raise ValueError("At least one parsed token is not a valid EVM address.")
+
+        records.append(
+            {
+                "year": int(year),
+                "week": int(week),
+                "currency": paid_in_currency.upper().strip(),
+                "investor": investor,
+                "token": token,
+                "amount": float(amount),
+            }
+        )
+
+    if not records:
+        raise ValueError(
+            "Parsing succeeded structurally, but no non-zero investor/token revenue row was found."
+        )
+
+    long_df = pd.DataFrame.from_records(
+        records,
+        columns=["year", "week", "currency", "investor", "token", "amount"],
+    )
 
     return _normalize_long_df(long_df)
 
@@ -328,10 +346,13 @@ def upsert_weekly_rent_csv_to_parquet(
         new_week_df.to_parquet(parquet_path, index=False, engine="pyarrow")
         return parquet_path
 
-    existing_df = pd.read_parquet(parquet_path, engine="pyarrow")
-    existing_df = _normalize_long_df(existing_df)
+    existing_df = pd.read_parquet(
+        parquet_path,
+        columns=["year", "week", "currency", "investor", "token", "amount"],
+        engine="pyarrow",
+    )
 
-    updated_df = pd.concat([existing_df, new_week_df], ignore_index=True)
+    updated_df = pd.concat([existing_df, new_week_df], ignore_index=True, copy=False)
     updated_df = _normalize_long_df(updated_df)
 
     updated_df.to_parquet(parquet_path, index=False, engine="pyarrow")
