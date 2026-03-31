@@ -87,6 +87,19 @@ def realtokens_performance():
 
         
         wallets = get_all_user_linked_addresses(wallet, THE_GRAPH_API_KEY, REALTOKEN_GNOSIS_SUBGRAPH_ID)
+        
+        # return 422 error if wallet is not whitelisted
+        if not wallets:
+            logger.info(
+                "Skipping performance calculation for wallet %s : not whitelisted",
+                wallet
+            )
+            return jsonify({
+                "error": {
+                    "code": "NO_LINKED_WALLETS_FOUND",
+                    "message": "Unable to process this wallet. It may not be whitelisted, please verify the address."
+                }
+            }), 422
 
         
         if CACHE_ENABLED and not no_cache:
