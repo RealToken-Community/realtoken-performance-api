@@ -7,13 +7,13 @@ from flask import Flask, jsonify, current_app
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config.logging_config_api import setup_logging
 from config.settings import API_URL_PREFIX_V1, RATE_LIMITER_ENABLED, RATE_LIMITER_PARAMS
 from core.services.send_telegram_alert import send_telegram_alert
 from core.services.utilities import test_postgres_connection
 from api.routes.v1 import v1_bp
-
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -81,6 +81,15 @@ def create_app() -> Flask:
 
     # Maximum size of paylaod (8 KB)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
+
+    # Trust exactly 1 proxy in front of Flask (Traefik)
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_port=1,
+    )
 
     # Set up rate limiter
     limiter = None
